@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tesouraria IASD Curicica — Painel Financeiro</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root{
+    --navy:#0E2841; --blue:#156082; --lightblue:#6FB6D9;
+    --orange:#E97132; --lightorange:#F3B27E;
+    --green:#196B24; --red:#C00000;
+    --gray:#595959; --lightgray:#8C8C8C;
+    --card:#F5F6F8; --border:#E4E9EE;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#fff;color:#262626;}
+  header{background:var(--navy);color:#fff;padding:24px 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;}
+  header h1{margin:0;font-size:22px;}
+  header p{margin:2px 0 0;color:#9FB2C2;font-size:13px;}
+  #syncStatus{font-size:12.5px;color:#9FB2C2;}
+  #syncStatus.ok{color:#8FD19E;}
+  #syncStatus.err{color:#F2A0A0;}
+  main{max-width:1200px;margin:0 auto;padding:20px 16px 60px;}
+  section{margin-top:32px;}
+  h2{font-size:19px;color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px;}
+  .muted{color:var(--gray);font-size:13px;}
+
+  #libBanner{display:none;background:#FDECEC;color:#8B0000;padding:14px 24px;font-size:14px;border-bottom:2px solid #C00000;}
+
+  .kpis{display:flex;gap:16px;flex-wrap:wrap;}
+  .kpi{flex:1;min-width:220px;background:var(--card);border-radius:10px;padding:18px 20px;border-top:4px solid var(--blue);}
+  .kpi.orange{border-top-color:var(--orange);}
+  .kpi .label{font-size:12px;font-weight:700;color:var(--gray);letter-spacing:.5px;text-transform:uppercase;}
+  .kpi .value{font-size:30px;font-weight:800;margin:6px 0;}
+  .kpi.blue .value{color:var(--blue);} .kpi.orange .value{color:var(--orange);}
+  .kpi .delta{font-size:13px;font-weight:700;}
+  .up-good{color:var(--green);} .up-bad{color:var(--red);}
+
+  canvas{max-width:100%;}
+  .chart-wrap{background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px;}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+  @media(max-width:800px){.two-col{grid-template-columns:1fr;}}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th{background:var(--navy);color:#fff;text-align:right;padding:8px 10px;font-size:12.5px;}
+  th:first-child,td:first-child{text-align:left;}
+  td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--border);}
+  tr:nth-child(even) td{background:#F8F9FA;}
+  tr.total td{font-weight:800;background:var(--border)!important;}
+  .blue-txt{color:var(--blue);font-weight:700;} .lightblue-txt{color:var(--lightblue);font-weight:700;}
+  .orange-txt{color:var(--orange);font-weight:700;} .lightorange-txt{color:var(--lightorange);font-weight:700;}
+  .var-up{color:var(--green);font-weight:700;} .var-down{color:var(--red);font-weight:700;}
+
+  select{padding:8px 12px;border-radius:6px;border:1px solid #ccc;font-size:14px;}
+  button{background:var(--blue);color:#fff;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;}
+  footer{text-align:center;color:var(--lightgray);font-size:12px;padding:24px;}
+  .table-scroll{overflow-x:auto;}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Tesouraria — IASD Curicica</h1>
+    <p>Painel de Entradas x Saídas — Conectando Pessoas</p>
+  </div>
+  <div id="syncStatus">Carregando...</div>
+</header>
+
+<div id="libBanner"></div>
+
+<main>
+
+  <section>
+    <h2>Resumo do mês mais recente</h2>
+    <div class="kpis" id="kpiRow"></div>
+  </section>
+
+  <section>
+    <h2>Categorias do Resumo Financeiro</h2>
+    <p class="muted">Ajuste aqui o que conta como Entrada, Saída ou deve ser Excluído (ex.: dízimo). Muda de qualquer dispositivo, atualiza pra todo mundo.</p>
+    <div class="table-scroll" id="categoryFilterWrap"></div>
+  </section>
+
+  <section>
+    <h2>Entradas x Saídas — Mensal 2026</h2>
+    <div class="chart-wrap"><canvas id="chartMonthly2026" height="90"></canvas></div>
+  </section>
+
+  <section>
+    <h2>Comparativo Anual (2025 x 2026)</h2>
+    <div class="two-col">
+      <div class="chart-wrap"><canvas id="chartEntradasAno" height="220"></canvas></div>
+      <div class="chart-wrap"><canvas id="chartSaidasAno" height="220"></canvas></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Detalhe Mensal Completo</h2>
+    <div class="table-scroll" id="tableFullWrap"></div>
+  </section>
+
+  <section>
+    <h2>Visão por Departamento</h2>
+    <div style="margin:10px 0;">
+      <label class="muted">Mês: </label>
+      <select id="deptMonthSelect"></select>
+    </div>
+    <div class="table-scroll" id="tableDeptWrap"></div>
+  </section>
+
+</main>
+
+<footer>IASD Curicica — Conectando Pessoas · Dados sincronizados automaticamente pelo vigia de pasta</footer>
+
+<script>
+/* ===================== Configuração — preencha com os dados do seu projeto Supabase ===================== */
+const SUPABASE_URL = "https://lkonedutfbilywcordgt.supabase.co";      // ex: https://xxxxx.supabase.co
+const SUPABASE_ANON_KEY = "sb_publishable_oO4yO9QdShu6tu4DUkb6aQ_ctENLfap";            // Project Settings > API > anon public
+const REFRESH_SECONDS = 30; // de quanto em quanto tempo o painel busca dados novos sozinho
+
+/* ===================== Helpers ===================== */
+const MONTH_NAMES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const COLORS = { navy:'#0E2841', blue:'#156082', lightblue:'#6FB6D9', orange:'#E97132', lightorange:'#F3B27E', green:'#196B24', red:'#C00000' };
+
+function brl(n, decimals=2){
+  if(n===null||n===undefined) return '—';
+  const sign = n<0 ? '-':'';
+  n = Math.abs(n);
+  const parts = n.toFixed(decimals).split('.');
+  return sign + 'R$ ' + parts[0].replace(/\B(?=(\d{3})+(?!\d))/g,'.') + (decimals>0 ? ','+parts[1] : '');
+}
+function num(n, decimals=2){
+  if(n===null||n===undefined) return '—';
+  const sign = n<0 ? '-':'';
+  n = Math.abs(n);
+  const parts = n.toFixed(decimals).split('.');
+  return sign + parts[0].replace(/\B(?=(\d{3})+(?!\d))/g,'.') + (decimals>0 ? ','+parts[1] : '');
+}
+function pctAbs(n){ return Math.abs(n).toFixed(1).replace('.',',')+'%'; }
+function monthLabel(key){ const [y,m]=key.split('-'); return MONTH_NAMES[parseInt(m,10)-1]+'/'+y.slice(2); }
+function round2(n){ return Math.round(n*100)/100; }
+
+function suggestClassification(nome, grupo){
+  if(grupo===1){
+    const n=(nome||'').toLowerCase();
+    if(n.includes('dízimo')||n.includes('dizimo')) return 'excluir';
+    if(n.includes('missão')||n.includes('missao')||n.includes('missionári')) return 'excluir';
+    if(n.includes('empréstimo')||n.includes('emprestimo')) return 'excluir';
+    return 'entrada';
+  }
+  return grupo===2 ? 'saida' : 'excluir';
+}
+
+let state = {};
+let categoryRegistry = {};
+let categoryFilters = {};
+let charts = {};
+
+/* ===================== Supabase (via REST simples, sem SDK) ===================== */
+async function sbFetch(path, opts={}){
+  const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+    ...opts,
+    headers: {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json',
+      ...(opts.headers||{})
+    }
+  });
+  if(!res.ok) throw new Error('Supabase ' + res.status + ': ' + await res.text());
+  return res.status === 204 ? null : res.json();
+}
+
+async function loadFromSupabase(){
+  const rows = await sbFetch('monthly_data?select=month_key,data');
+  const newState = {};
+  rows.forEach(r => { newState[r.month_key] = r.data; });
+  state = newState;
+
+  const settingsRows = await sbFetch('app_settings?select=category_registry,category_filters&id=eq.1');
+  if(settingsRows && settingsRows[0]){
+    categoryRegistry = settingsRows[0].category_registry || {};
+    categoryFilters = settingsRows[0].category_filters || {};
+  }
+}
+
+async function saveCategoryFilters(){
+  await sbFetch('app_settings?id=eq.1', {
+    method: 'PATCH',
+    body: JSON.stringify({ category_filters: categoryFilters, updated_at: new Date().toISOString() })
+  });
+}
+
+function computeEntradaSaidaFromCategorias(monthKey){
+  const d = state[monthKey];
+  if(!d || !d.categoriaRows) return;
+  let e=0, s=0;
+  d.categoriaRows.forEach(r=>{
+    const cls = categoryFilters[r.codigo] || suggestClassification(r.nome, r.grupo);
+    if(cls==='entrada') e+=r.valor; else if(cls==='saida') s+=r.valor;
+  });
+  d.entrada = round2(e); d.saida = round2(s);
+}
+function recomputeAllFromCategorias(){
+  Object.keys(state).forEach(k=>{ if(state[k].categoriaRows) computeEntradaSaidaFromCategorias(k); });
+}
+
+/* ===================== Renderização (mesma lógica do painel local) ===================== */
+function destroyChart(key, canvasId){
+  if(charts[key]){ try{ charts[key].destroy(); }catch(e){} delete charts[key]; }
+  if(canvasId){
+    const el = document.getElementById(canvasId);
+    if(el && typeof Chart!=='undefined' && Chart.getChart){ const ex=Chart.getChart(el); if(ex) try{ex.destroy();}catch(e){} }
+  }
+}
+function getSortedMonthKeys(){ return Object.keys(state).sort(); }
+
+function cardHtml(title, val, base, colorClass, goodUp){
+  let deltaBlock = '<div class="muted" style="font-size:12px;margin-top:4px;">sem mês anterior para comparar</div>';
+  if(base!=null && base!==0){
+    const d = (val/base-1)*100;
+    const good = goodUp ? d>=0 : d<=0;
+    deltaBlock = '<div class="delta '+(good?'up-good':'up-bad')+'">'+(d>=0?'▲':'▼')+' '+pctAbs(d)+' <span class="muted" style="font-weight:400;">vs mês anterior</span></div>';
+  }
+  return '<div class="kpi '+colorClass+'"><div class="label">'+title+'</div><div class="value">'+brl(val)+'</div>'+deltaBlock+'</div>';
+}
+
+function renderKPIs(){
+  const keys = getSortedMonthKeys().filter(k=>state[k].entrada!=null);
+  const wrap = document.getElementById('kpiRow');
+  if(keys.length===0){ wrap.innerHTML='<p class="muted">Nenhum dado de Entradas/Saídas ainda. O vigia de pasta sincroniza assim que você soltar um resumo financeiro na pasta.</p>'; return; }
+  const latestKey = keys[keys.length-1];
+  const latest = state[latestKey];
+  const [y,m] = latestKey.split('-').map(Number);
+  const prevKey = (m===1) ? (y-1)+'-12' : y+'-'+String(m-1).padStart(2,'0');
+  const prev = state[prevKey];
+  wrap.innerHTML = [
+    cardHtml('Entradas — '+monthLabel(latestKey), latest.entrada, prev?.entrada ?? null, 'blue', true),
+    cardHtml('Saídas — '+monthLabel(latestKey), latest.saida, prev?.saida ?? null, 'orange', false)
+  ].join('');
+}
+
+function renderCategoryFilters(){
+  const wrap = document.getElementById('categoryFilterWrap');
+  const codes = Object.keys(categoryRegistry).sort((a,b)=>Number(a)-Number(b));
+  if(codes.length===0){ wrap.innerHTML = '<p class="muted">Nenhuma categoria sincronizada ainda.</p>'; return; }
+  const totals = {};
+  Object.values(state).forEach(d=>{ if(d.categoriaRows) d.categoriaRows.forEach(r=>{ totals[r.codigo]=(totals[r.codigo]||0)+r.valor; }); });
+  let html = '<table><thead><tr><th>Código</th><th>Categoria</th><th>Grupo original</th><th>Total acumulado</th><th>Considerar como</th></tr></thead><tbody>';
+  codes.forEach((c,i)=>{
+    const cat = categoryRegistry[c]; const cls = categoryFilters[c];
+    html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'><td>'+cat.codigo+'</td><td>'+cat.nome+'</td>'+
+      '<td>'+(cat.grupoOriginal===1?'Entrada':(cat.grupoOriginal===2?'Despesa':'—'))+'</td>'+
+      '<td>'+brl(totals[c]||0)+'</td>'+
+      '<td><select data-codigo="'+c+'" class="catSelect">'+
+        '<option value="entrada"'+(cls==='entrada'?' selected':'')+'>Entrada</option>'+
+        '<option value="saida"'+(cls==='saida'?' selected':'')+'>Saída</option>'+
+        '<option value="excluir"'+(cls==='excluir'?' selected':'')+'>Excluir</option>'+
+      '</select></td></tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('.catSelect').forEach(sel=>{
+    sel.addEventListener('change', async e=>{
+      categoryFilters[e.target.getAttribute('data-codigo')] = e.target.value;
+      recomputeAllFromCategorias();
+      renderAll();
+      try{ await saveCategoryFilters(); setSyncStatus('ok','✓ Classificação salva'); }
+      catch(err){ setSyncStatus('err','⚠ Não consegui salvar: '+err.message); }
+    });
+  });
+}
+
+function renderMonthly2026Chart(){
+  const entrada=[], saida=[];
+  for(let i=0;i<12;i++){ const k='2026-'+String(i+1).padStart(2,'0'); entrada.push(state[k]?.entrada ?? null); saida.push(state[k]?.saida ?? null); }
+  destroyChart('m2026','chartMonthly2026');
+  charts.m2026 = new Chart(document.getElementById('chartMonthly2026'), {
+    type:'bar', data:{ labels:MONTH_NAMES, datasets:[
+      {label:'Entradas', data:entrada, backgroundColor:COLORS.blue},
+      {label:'Saídas', data:saida, backgroundColor:COLORS.orange}
+    ]}, options:{ responsive:true, plugins:{legend:{position:'top'}} }
+  });
+}
+
+function renderYearCompareCharts(){
+  const e25=[],e26=[],s25=[],s26=[];
+  for(let i=0;i<12;i++){
+    const k25='2025-'+String(i+1).padStart(2,'0'), k26='2026-'+String(i+1).padStart(2,'0');
+    e25.push(state[k25]?.entrada ?? null); e26.push(state[k26]?.entrada ?? null);
+    s25.push(state[k25]?.saida ?? null); s26.push(state[k26]?.saida ?? null);
+  }
+  destroyChart('eAno','chartEntradasAno'); destroyChart('sAno','chartSaidasAno');
+  charts.eAno = new Chart(document.getElementById('chartEntradasAno'),{ type:'bar', data:{labels:MONTH_NAMES, datasets:[
+    {label:'2025', data:e25, backgroundColor:COLORS.lightblue}, {label:'2026', data:e26, backgroundColor:COLORS.blue}
+  ]}, options:{responsive:true, plugins:{legend:{position:'top'},title:{display:true,text:'Entradas — 2025 x 2026'}}}});
+  charts.sAno = new Chart(document.getElementById('chartSaidasAno'),{ type:'bar', data:{labels:MONTH_NAMES, datasets:[
+    {label:'2025', data:s25, backgroundColor:COLORS.lightorange}, {label:'2026', data:s26, backgroundColor:COLORS.orange}
+  ]}, options:{responsive:true, plugins:{legend:{position:'top'},title:{display:true,text:'Saídas — 2025 x 2026'}}}});
+}
+
+function renderFullTable(){
+  let rows = '<table><thead><tr><th>Mês</th><th>Entradas 2025</th><th>Entradas 2026</th><th>Var.</th><th>Saídas 2025</th><th>Saídas 2026</th><th>Var.</th></tr></thead><tbody>';
+  let totE25=0,totE26=0,totS25=0,totS26=0, hasE26=false, hasS26=false;
+  for(let i=0;i<12;i++){
+    const k25='2025-'+String(i+1).padStart(2,'0'), k26='2026-'+String(i+1).padStart(2,'0');
+    const d25=state[k25], d26=state[k26];
+    const e25=d25?.entrada ?? null, e26=d26?.entrada ?? null;
+    const s25=d25?.saida ?? null, s26=d26?.saida ?? null;
+    if(e25!=null) totE25+=e25; if(e26!=null){totE26+=e26; hasE26=true;}
+    if(s25!=null) totS25+=s25; if(s26!=null){totS26+=s26; hasS26=true;}
+    const varE = (e25!=null && e26!=null) ? (e26/e25-1)*100 : null;
+    const varS = (s25!=null && s26!=null) ? (s26/s25-1)*100 : null;
+    rows += '<tr><td>'+MONTH_NAMES[i]+'</td>'+
+      '<td class="lightblue-txt">'+num(e25)+'</td><td class="blue-txt">'+num(e26)+'</td>'+
+      '<td class="'+(varE===null?'':(varE>=0?'var-up':'var-down'))+'">'+(varE===null?'—':((varE>=0?'▲ ':'▼ ')+pctAbs(varE)))+'</td>'+
+      '<td class="lightorange-txt">'+num(s25)+'</td><td class="orange-txt">'+num(s26)+'</td>'+
+      '<td class="'+(varS===null?'':(varS<=0?'var-up':'var-down'))+'">'+(varS===null?'—':((varS>=0?'▲ ':'▼ ')+pctAbs(varS)))+'</td></tr>';
+  }
+  const varTotE = hasE26 ? (totE26/totE25-1)*100 : null;
+  const varTotS = hasS26 ? (totS26/totS25-1)*100 : null;
+  rows += '<tr class="total"><td>TOTAL</td>'+
+    '<td class="lightblue-txt">'+num(totE25)+'</td><td class="blue-txt">'+num(totE26)+(hasE26?' *':'')+'</td>'+
+    '<td class="'+(varTotE===null?'':(varTotE>=0?'var-up':'var-down'))+'">'+(varTotE===null?'—':((varTotE>=0?'▲ ':'▼ ')+pctAbs(varTotE)))+'</td>'+
+    '<td class="lightorange-txt">'+num(totS25)+'</td><td class="orange-txt">'+num(totS26)+(hasS26?' *':'')+'</td>'+
+    '<td class="'+(varTotS===null?'':(varTotS<=0?'var-up':'var-down'))+'">'+(varTotS===null?'—':((varTotS>=0?'▲ ':'▼ ')+pctAbs(varTotS)))+'</td></tr>';
+  rows += '</tbody></table><p class="muted">* Total 2026 considera apenas os meses já sincronizados.</p>';
+  document.getElementById('tableFullWrap').innerHTML = rows;
+}
+
+function pctVar(si, sf){ if(Math.abs(si)<0.005) return sf===0?0:null; return (sf-si)/Math.abs(si)*100; }
+
+function renderDeptMonthSelect(){
+  const sel = document.getElementById('deptMonthSelect');
+  const keysWithDept = getSortedMonthKeys().filter(k=>state[k].departments && state[k].departments.length);
+  const prevVal = sel.value;
+  sel.innerHTML = keysWithDept.map(k=>'<option value="'+k+'">'+monthLabel(k)+'</option>').join('');
+  sel.value = keysWithDept.includes(prevVal) ? prevVal : (keysWithDept[keysWithDept.length-1] || '');
+}
+
+function renderDeptView(){
+  const key = document.getElementById('deptMonthSelect').value;
+  const data = state[key];
+  if(!data || !data.departments){ document.getElementById('tableDeptWrap').innerHTML = '<p class="muted">Nenhum dado de departamento ainda.</p>'; return; }
+  const sorted = [...data.departments].sort((a,b)=>a.saldoFinal-b.saldoFinal);
+  let html = '<table><thead><tr><th>Departamento</th><th>Orçamento</th><th>Oferta Direta</th><th>Saldo Inicial</th><th>Saldo Final</th><th>Variação</th></tr></thead><tbody>';
+  let totOrc=0,totOD=0,totSI=0,totSF=0;
+  sorted.forEach(d=>{
+    totOrc+=d.orcamento||0; totOD+=d.ofertaDireta||0; totSI+=d.saldoInicial; totSF+=d.saldoFinal;
+    const vp = pctVar(d.saldoInicial, d.saldoFinal);
+    const varTxt = vp===null?'novo':(vp===0?'0,0%':(vp>0?'▲ ':'▼ ')+pctAbs(vp));
+    const varClass = vp===null||vp===0?'':(vp>0?'var-up':'var-down');
+    html += '<tr><td>'+d.nome+'</td><td>'+(d.orcamento?num(d.orcamento,0):'—')+'</td>'+
+      '<td class="blue-txt">'+(d.ofertaDireta?num(d.ofertaDireta):'—')+'</td>'+
+      '<td>'+num(d.saldoInicial)+'</td>'+
+      '<td'+(d.saldoFinal<0?' style="color:var(--red);font-weight:700;"':' style="font-weight:700;"')+'>'+num(d.saldoFinal)+'</td>'+
+      '<td class="'+varClass+'">'+varTxt+'</td></tr>';
+  });
+  const totVp = pctVar(totSI, totSF);
+  html += '<tr class="total"><td>TOTAL</td><td>'+num(totOrc,0)+'</td><td class="blue-txt">'+num(totOD)+'</td><td>'+num(totSI)+'</td>'+
+    '<td'+(totSF<0?' style="color:var(--red);"':'')+'>'+num(totSF)+'</td>'+
+    '<td class="'+(totVp>=0?'var-up':'var-down')+'">'+(totVp===null?'—':(totVp>=0?'▲ ':'▼ ')+pctAbs(totVp))+'</td></tr>';
+  html += '</tbody></table>';
+  document.getElementById('tableDeptWrap').innerHTML = html;
+}
+
+function renderAll(){
+  const steps = [
+    ['categorias', renderCategoryFilters], ['KPIs', renderKPIs],
+    ['gráfico mensal', renderMonthly2026Chart], ['gráficos anuais', renderYearCompareCharts],
+    ['tabela mensal', renderFullTable], ['seletor de departamento', renderDeptMonthSelect], ['visão por departamento', renderDeptView]
+  ];
+  steps.forEach(([label,fn])=>{ try{ fn(); }catch(err){ console.error(label, err); } });
+}
+
+function setSyncStatus(cls, text){
+  const el = document.getElementById('syncStatus');
+  el.className = cls; el.textContent = text;
+}
+
+async function refresh(){
+  try{
+    await loadFromSupabase();
+    recomputeAllFromCategorias();
+    renderAll();
+    setSyncStatus('ok', '✓ Atualizado ' + new Date().toLocaleTimeString('pt-BR'));
+  }catch(err){
+    setSyncStatus('err', '⚠ Falha ao sincronizar: ' + err.message);
+    console.error(err);
+  }
+}
+
+/* ===================== Início ===================== */
+(function init(){
+  if(SUPABASE_URL.startsWith('COLE_AQUI') || SUPABASE_ANON_KEY.startsWith('COLE_AQUI')){
+    const b = document.getElementById('libBanner');
+    b.style.display = 'block';
+    b.innerHTML = '<b>⚠ Configuração pendente.</b> Abra este arquivo e preencha SUPABASE_URL e SUPABASE_ANON_KEY no topo do &lt;script&gt;.';
+    setSyncStatus('err', 'Não configurado');
+    return;
+  }
+  refresh();
+  setInterval(refresh, REFRESH_SECONDS * 1000);
+})();
+</script>
+</body>
+</html>
