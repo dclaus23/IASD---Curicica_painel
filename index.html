@@ -35,6 +35,13 @@
   header{background:var(--navy);color:#fff;padding:24px 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;}
   header h1{margin:0;font-size:22px;}
   header p{margin:2px 0 0;color:#9FB2C2;font-size:13px;}
+
+  .tabs{display:flex;gap:4px;background:var(--navy);padding:0 20px;border-bottom:1px solid #1E3A52;overflow-x:auto;}
+  .tab-btn{background:transparent;border:none;color:#9FB2C2;padding:14px 18px;cursor:pointer;font-size:14px;font-weight:600;border-bottom:3px solid transparent;white-space:nowrap;transition:.15s;}
+  .tab-btn:hover{color:#fff;}
+  .tab-btn.active{color:#fff;border-bottom-color:var(--blue);}
+  .tab-panel{display:none;}
+  .tab-panel.active{display:block;}
   #syncStatus{font-size:12.5px;color:#9FB2C2;}
   #syncStatus.ok{color:#8FD19E;}
   #syncStatus.err{color:#F2A0A0;}
@@ -48,6 +55,8 @@
   .kpis{display:flex;gap:16px;flex-wrap:wrap;}
   .kpi{flex:1;min-width:220px;background:var(--card);border-radius:10px;padding:18px 20px;border-top:4px solid var(--blue);}
   .kpi.orange{border-top-color:var(--orange);}
+  .kpi.green{border-top-color:var(--green);} .kpi.green .value{color:var(--green);}
+  .kpi.purple{border-top-color:#6B3FA0;} .kpi.purple .value{color:#6B3FA0;}
   .kpi .label{font-size:12px;font-weight:700;color:var(--gray);letter-spacing:.5px;text-transform:uppercase;}
   .kpi .value{font-size:30px;font-weight:800;margin:6px 0;}
   .kpi.blue .value{color:var(--blue);} .kpi.orange .value{color:var(--orange);}
@@ -85,47 +94,93 @@
   <div id="syncStatus">Carregando...</div>
 </header>
 
+<nav class="tabs">
+  <button class="tab-btn active" data-tab="tab-financeiro">Entradas x Saídas</button>
+  <button class="tab-btn" data-tab="tab-departamentos">Departamentos</button>
+  <button class="tab-btn" data-tab="tab-despesas">Despesas</button>
+</nav>
+
 <div id="libBanner"></div>
 
 <main>
 
-  <section>
-    <h2>Resumo do mês mais recente</h2>
-    <div class="kpis" id="kpiRow"></div>
-  </section>
+  <div id="tab-financeiro" class="tab-panel active">
 
-  <section>
-    <h2>Categorias do Resumo Financeiro</h2>
-    <p class="muted">Ajuste aqui o que conta como Entrada, Saída ou deve ser Excluído (ex.: dízimo). Muda de qualquer dispositivo, atualiza pra todo mundo.</p>
-    <div class="table-scroll" id="categoryFilterWrap"></div>
-  </section>
+    <section>
+      <h2>Resumo do mês mais recente</h2>
+      <div class="kpis" id="kpiRow"></div>
+    </section>
 
-  <section>
-    <h2>Entradas x Saídas — Mensal 2026</h2>
-    <div class="chart-wrap"><canvas id="chartMonthly2026" height="90"></canvas></div>
-  </section>
+    <section>
+      <h2>Dizimistas e Ofertantes</h2>
+      <p class="muted">Quantas pessoas diferentes contribuíram no mês, e o valor médio por pessoa.</p>
+      <div class="kpis" id="doadoresRow"></div>
+      <div class="chart-wrap" style="margin-top:16px;"><canvas id="chartDoadores" height="90"></canvas></div>
+    </section>
 
-  <section>
-    <h2>Comparativo Anual (2025 x 2026)</h2>
-    <div class="two-col">
-      <div class="chart-wrap"><canvas id="chartEntradasAno" height="220"></canvas></div>
-      <div class="chart-wrap"><canvas id="chartSaidasAno" height="220"></canvas></div>
-    </div>
-  </section>
+    <section>
+      <h2>Categorias do Resumo Financeiro</h2>
+      <p class="muted">Ajuste aqui o que conta como Entrada, Saída ou deve ser Excluído (ex.: dízimo). Muda de qualquer dispositivo, atualiza pra todo mundo — cards, gráficos e tabelas abaixo recalculam na hora.</p>
+      <div class="table-scroll" id="categoryFilterWrap"></div>
+    </section>
 
-  <section>
-    <h2>Detalhe Mensal Completo</h2>
-    <div class="table-scroll" id="tableFullWrap"></div>
-  </section>
+    <section>
+      <h2>Entradas x Saídas — Mensal 2026</h2>
+      <div class="chart-wrap"><canvas id="chartMonthly2026" height="90"></canvas></div>
+    </section>
 
-  <section>
-    <h2>Visão por Departamento</h2>
-    <div style="margin:10px 0;">
-      <label class="muted">Mês: </label>
-      <select id="deptMonthSelect"></select>
-    </div>
-    <div class="table-scroll" id="tableDeptWrap"></div>
-  </section>
+    <section>
+      <h2>Comparativo Anual (2025 x 2026)</h2>
+      <div class="two-col">
+        <div class="chart-wrap"><canvas id="chartEntradasAno" height="220"></canvas></div>
+        <div class="chart-wrap"><canvas id="chartSaidasAno" height="220"></canvas></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Detalhe Mensal Completo</h2>
+      <div class="table-scroll" id="tableFullWrap"></div>
+    </section>
+
+  </div>
+
+  <div id="tab-departamentos" class="tab-panel">
+
+    <section>
+      <h2>Visão por Departamento</h2>
+      <p class="muted">Saldo de cada departamento no início e no fim do mês, e quanto recebeu de oferta direta.</p>
+      <div style="margin:10px 0;">
+        <label class="muted">Mês: </label>
+        <select id="deptMonthSelect"></select>
+      </div>
+      <div class="table-scroll" id="tableDeptWrap"></div>
+    </section>
+
+  </div>
+
+  <div id="tab-despesas" class="tab-panel">
+
+    <section>
+      <h2>Categorias de Despesas (extrato)</h2>
+      <p class="muted">Detalhamento por categoria própria do extrato de despesas (código diferente do resumo financeiro — não misture os dois). Só leitura, informativo.</p>
+      <div style="margin:10px 0;">
+        <label class="muted">Mês: </label>
+        <select id="despesasCatMonthSelect"></select>
+      </div>
+      <div class="table-scroll" id="despesasCatWrap"></div>
+    </section>
+
+    <section>
+      <h2>Lançamentos de Despesas</h2>
+      <p class="muted">Cada despesa paga no mês, lançamento por lançamento.</p>
+      <div style="margin:10px 0;">
+        <label class="muted">Mês: </label>
+        <select id="despesasLancMonthSelect"></select>
+      </div>
+      <div class="table-scroll" id="despesasLancWrap"></div>
+    </section>
+
+  </div>
 
 </main>
 
@@ -234,14 +289,15 @@ function destroyChart(key, canvasId){
 }
 function getSortedMonthKeys(){ return Object.keys(state).sort(); }
 
-function cardHtml(title, val, base, colorClass, goodUp, extraHtml){
+function cardHtml(title, val, base, colorClass, goodUp, extraHtml, formatter){
+  formatter = formatter || brl;
   let deltaBlock = '<div class="muted" style="font-size:12px;margin-top:4px;">sem mês anterior para comparar</div>';
   if(base!=null && base!==0){
     const d = (val/base-1)*100;
     const good = goodUp ? d>=0 : d<=0;
     deltaBlock = '<div class="delta '+(good?'up-good':'up-bad')+'">'+(d>=0?'▲':'▼')+' '+pctAbs(d)+' <span class="muted" style="font-weight:400;">vs mês anterior</span></div>';
   }
-  return '<div class="kpi '+colorClass+'"><div class="label">'+title+'</div><div class="value">'+brl(val)+'</div>'+deltaBlock+(extraHtml||'')+'</div>';
+  return '<div class="kpi '+colorClass+'"><div class="label">'+title+'</div><div class="value">'+formatter(val)+'</div>'+deltaBlock+(extraHtml||'')+'</div>';
 }
 
 function reconciliationHtml(latest){
@@ -266,6 +322,42 @@ function renderKPIs(){
     cardHtml('Entradas — '+monthLabel(latestKey), latest.entrada, prev?.entrada ?? null, 'blue', true),
     cardHtml('Saídas — '+monthLabel(latestKey), latest.saida, prev?.saida ?? null, 'orange', false, reconciliationHtml(latest))
   ].join('');
+}
+
+function renderDoadoresRow(){
+  const keys = getSortedMonthKeys().filter(k=>state[k].doadores);
+  const wrap = document.getElementById('doadoresRow');
+  if(keys.length===0){ wrap.innerHTML='<p class="muted">Nenhum dado de dizimistas/ofertantes ainda. O vigia sincroniza assim que você soltar o extrato de Fidelidade na pasta.</p>'; return; }
+  const latestKey = keys[keys.length-1];
+  const d = state[latestKey].doadores;
+  const [y,m] = latestKey.split('-').map(Number);
+  const prevKey = (m===1) ? (y-1)+'-12' : y+'-'+String(m-1).padStart(2,'0');
+  const prevD = state[prevKey]?.doadores;
+  const pessoasFmt = n => num(n,0) + ' pessoas';
+  wrap.innerHTML = [
+    cardHtml('Dizimistas — '+monthLabel(latestKey), d.countDizimistas, prevD?.countDizimistas ?? null, 'green', true,
+      '<div class="muted" style="margin-top:6px;font-size:12px;">Média por pessoa: '+brl(d.mediaDizimo)+'</div>', pessoasFmt),
+    cardHtml('Ofertantes — '+monthLabel(latestKey), d.countOfertantes, prevD?.countOfertantes ?? null, 'purple', true,
+      '<div class="muted" style="margin-top:6px;font-size:12px;">Média por pessoa: '+brl(d.mediaOferta)+'</div>', pessoasFmt)
+  ].join('');
+}
+
+function renderDoadoresChart(){
+  const dizimistas=[], ofertantes=[];
+  for(let i=0;i<12;i++){
+    const k='2026-'+String(i+1).padStart(2,'0');
+    dizimistas.push(state[k]?.doadores?.countDizimistas ?? null);
+    ofertantes.push(state[k]?.doadores?.countOfertantes ?? null);
+  }
+  destroyChart('doadores','chartDoadores');
+  charts.doadores = new Chart(document.getElementById('chartDoadores'), {
+    type:'bar',
+    data:{ labels:MONTH_NAMES, datasets:[
+      {label:'Dizimistas', data:dizimistas, backgroundColor:COLORS.green},
+      {label:'Ofertantes', data:ofertantes, backgroundColor:'#6B3FA0'}
+    ]},
+    options:{ responsive:true, plugins:{legend:{position:'top'},title:{display:true,text:'Dizimistas e Ofertantes — 2026 (pessoas únicas por mês)'}} }
+  });
 }
 
 function renderCategoryFilters(){
@@ -297,6 +389,68 @@ function renderCategoryFilters(){
       catch(err){ setSyncStatus('err','⚠ Não consegui salvar: '+err.message); }
     });
   });
+}
+
+function renderDespesasCatMonthSelect(){
+  const sel = document.getElementById('despesasCatMonthSelect');
+  const keys = getSortedMonthKeys().filter(k=>state[k].despesasCategorias && state[k].despesasCategorias.length);
+  const prevVal = sel.value;
+  sel.innerHTML = keys.map(k=>'<option value="'+k+'">'+monthLabel(k)+'</option>').join('');
+  sel.value = keys.includes(prevVal) ? prevVal : (keys[keys.length-1] || '');
+}
+
+function renderDespesasCategories(){
+  const key = document.getElementById('despesasCatMonthSelect').value;
+  const wrap = document.getElementById('despesasCatWrap');
+  const data = state[key];
+  if(!data || !data.despesasCategorias || !data.despesasCategorias.length){
+    wrap.innerHTML = '<p class="muted">Nenhum extrato de despesas carregado ainda para este mês.</p>';
+    return;
+  }
+  const sorted = [...data.despesasCategorias].sort((a,b)=>b.valor-a.valor);
+  let html = '<table><thead><tr><th>Código</th><th>Categoria</th><th>Lançamentos</th><th>Total no mês</th></tr></thead><tbody>';
+  let totV=0, totC=0;
+  sorted.forEach((c,i)=>{
+    totV += c.valor; totC += c.count;
+    html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'><td>'+c.codigo+'</td><td>'+c.nome+'</td>'+
+      '<td>'+c.count+'</td><td class="orange-txt">'+brl(c.valor)+'</td></tr>';
+  });
+  html += '<tr class="total"><td colspan="2">TOTAL</td><td>'+totC+'</td><td class="orange-txt">'+brl(totV)+'</td></tr>';
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function renderDespesasLancMonthSelect(){
+  const sel = document.getElementById('despesasLancMonthSelect');
+  const keys = getSortedMonthKeys().filter(k=>state[k].despesasLancamentos && state[k].despesasLancamentos.length);
+  const prevVal = sel.value;
+  sel.innerHTML = keys.map(k=>'<option value="'+k+'">'+monthLabel(k)+'</option>').join('');
+  sel.value = keys.includes(prevVal) ? prevVal : (keys[keys.length-1] || '');
+}
+
+function renderDespesasLancamentos(){
+  const key = document.getElementById('despesasLancMonthSelect').value;
+  const wrap = document.getElementById('despesasLancWrap');
+  const data = state[key];
+  if(!data || !data.despesasLancamentos || !data.despesasLancamentos.length){
+    wrap.innerHTML = '<p class="muted">Nenhum lançamento de despesa carregado ainda para este mês.</p>';
+    return;
+  }
+  const sorted = [...data.despesasLancamentos].sort((a,b)=>{
+    const da = a.data.split('/').reverse().join('-'), db = b.data.split('/').reverse().join('-');
+    return da.localeCompare(db);
+  });
+  let html = '<table><thead><tr><th>Data</th><th>Departamento</th><th>Categoria</th><th>Descrição</th><th>Empresa</th><th>Valor</th></tr></thead><tbody>';
+  let tot = 0;
+  sorted.forEach((l,i)=>{
+    tot += l.valor;
+    html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'><td>'+l.data+'</td><td>'+l.departamento+'</td><td>'+l.categoria+'</td>'+
+      '<td style="text-align:left;max-width:320px;">'+l.descricao+'</td><td>'+l.empresa+'</td>'+
+      '<td class="orange-txt">'+brl(l.valor)+'</td></tr>';
+  });
+  html += '<tr class="total"><td colspan="5">TOTAL — '+sorted.length+' lançamentos</td><td class="orange-txt">'+brl(tot)+'</td></tr>';
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
 }
 
 function renderMonthly2026Chart(){
@@ -395,8 +549,11 @@ function renderDeptView(){
 function renderAll(){
   const steps = [
     ['categorias', renderCategoryFilters], ['KPIs', renderKPIs],
+    ['doadores (cards)', renderDoadoresRow], ['doadores (gráfico)', renderDoadoresChart],
     ['gráfico mensal', renderMonthly2026Chart], ['gráficos anuais', renderYearCompareCharts],
-    ['tabela mensal', renderFullTable], ['seletor de departamento', renderDeptMonthSelect], ['visão por departamento', renderDeptView]
+    ['tabela mensal', renderFullTable], ['seletor de departamento', renderDeptMonthSelect], ['visão por departamento', renderDeptView],
+    ['seletor de categorias de despesas', renderDespesasCatMonthSelect], ['categorias de despesas', renderDespesasCategories],
+    ['seletor de lançamentos de despesas', renderDespesasLancMonthSelect], ['lançamentos de despesas', renderDespesasLancamentos]
   ];
   steps.forEach(([label,fn])=>{ try{ fn(); }catch(err){ console.error(label, err); } });
 }
@@ -417,6 +574,19 @@ async function refresh(){
     console.error(err);
   }
 }
+
+document.getElementById('deptMonthSelect').addEventListener('change', renderDeptView);
+document.getElementById('despesasCatMonthSelect').addEventListener('change', renderDespesasCategories);
+document.getElementById('despesasLancMonthSelect').addEventListener('change', renderDespesasLancamentos);
+
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.getAttribute('data-tab')).classList.add('active');
+  });
+});
 
 /* ===================== Início ===================== */
 (function init(){
