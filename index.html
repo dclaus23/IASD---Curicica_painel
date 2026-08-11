@@ -199,6 +199,12 @@
       <div class="chart-wrap"><canvas id="chartDoadores" height="100"></canvas></div>
     </section>
 
+    <section>
+      <h2>Valores por Categoria (Dízimo, Ofertas e demais)</h2>
+      <p class="muted">Detalhamento por categoria própria da Fidelidade, do mês selecionado acima. Para categorias como Ofertas | Pacto, informe o % que realmente fica com a igreja local (o resto vai para a Associação).</p>
+      <div class="table-scroll" id="doadoresCatWrap"></div>
+    </section>
+
   </div>
 
 </main>
@@ -253,6 +259,8 @@ function suggestClassification(nome, grupo){
 let state = {};
 let categoryRegistry = {};
 let categoryFilters = {};
+let categoryPercentages = {};
+let categoryPercentagesFidelidade = {};
 let charts = {};
 
 /* ===================== Supabase (via REST simples, sem SDK) ===================== */
@@ -276,17 +284,24 @@ async function loadFromSupabase(){
   rows.forEach(r => { newState[r.month_key] = r.data; });
   state = newState;
 
-  const settingsRows = await sbFetch('app_settings?select=category_registry,category_filters&id=eq.1');
+  const settingsRows = await sbFetch('app_settings?select=category_registry,category_filters,category_percentages,category_percentages_fidelidade&id=eq.1');
   if(settingsRows && settingsRows[0]){
     categoryRegistry = settingsRows[0].category_registry || {};
     categoryFilters = settingsRows[0].category_filters || {};
+    categoryPercentages = settingsRows[0].category_percentages || {};
+    categoryPercentagesFidelidade = settingsRows[0].category_percentages_fidelidade || {};
   }
 }
 
-async function saveCategoryFilters(){
+async function saveCategorySettings(){
   await sbFetch('app_settings?id=eq.1', {
     method: 'PATCH',
-    body: JSON.stringify({ category_filters: categoryFilters, updated_at: new Date().toISOString() })
+    body: JSON.stringify({
+      category_filters: categoryFilters,
+      category_percentages: categoryPercentages,
+      category_percentages_fidelidade: categoryPercentagesFidelidade,
+      updated_at: new Date().toISOString()
+    })
   });
 }
 
@@ -296,7 +311,8 @@ function computeEntradaSaidaFromCategorias(monthKey){
   let e=0, s=0;
   d.categoriaRows.forEach(r=>{
     const cls = categoryFilters[r.codigo] || suggestClassification(r.nome, r.grupo);
-    if(cls==='entrada') e+=r.valor; else if(cls==='saida') s+=r.valor;
+    const pct = categoryPercentages[r.codigo] ?? 100;
+    if(cls==='entrada') e += r.valor * (pct/100); else if(cls==='saida') s += r.valor;
   });
   d.entrada = round2(e); d.saida = round2(s);
 }
@@ -363,7 +379,7 @@ function renderSortableTable(wrapId, columns, rows, sortState, footerHtml){
   sorted.forEach((row,i)=>{
     html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'>';
     columns.forEach(c=>{
-      const display = c.format ? c.format(row) : row[c.key];
+      const display = c.format ? c.format(row) : (row[c.key]===undefined||row[c.key]===null||row[c.key]==='' ? '—' : row[c.key]);
       const cls = c.cellClass ? c.cellClass(row) : '';
       html += '<td'+(c.left?' style="text-align:left;"':'')+(cls?' class="'+cls+'"':'')+'>'+display+'</td>';
     });
@@ -415,28 +431,46 @@ function renderCategoryFilters(){
   const wrap = document.getElementById('categoryFilterWrap');
   const rows = state[monthKey]?.categoriaRows;
   if(!rows || !rows.length){ wrap.innerHTML = '<p class="muted">Nenhuma categoria sincronizada para o mês selecionado.</p>'; return; }
-  let html = '<table><thead><tr><th style="text-align:left;">Categoria</th><th>Igreja Local</th><th>7Me</th><th>Total</th><th>Considerar como</th></tr></thead><tbody>';
-  let totIL=0, tot7=0, totT=0;
+  let html = '<table><thead><tr><th style="text-align:left;">Categoria</th><th>Igreja Local</th><th>7Me</th><th>Total</th><th>% Igreja</th><th>Valor Considerado</th><th>Considerar como</th></tr></thead><tbody>';
+  let totIL=0, tot7=0, totT=0, totConsid=0;
   rows.forEach((r,i)=>{
     const cls = categoryFilters[r.codigo] || suggestClassification(r.nome, r.grupo);
-    totIL += r.igrejaLocal||0; tot7 += r.sete7me||0; totT += r.valor||0;
+    const pct = categoryPercentages[r.codigo] ?? 100;
+    const considerado = round2((r.valor||0) * (pct/100));
+    totIL += r.igrejaLocal||0; tot7 += r.sete7me||0; totT += r.valor||0; totConsid += considerado;
     html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'><td style="text-align:left;">'+r.nome+'</td>'+
       '<td>'+brl(r.igrejaLocal||0)+'</td><td>'+brl(r.sete7me||0)+'</td><td>'+brl(r.valor)+'</td>'+
+      '<td><input type="number" class="pctInput" data-codigo="'+r.codigo+'" value="'+pct+'" min="0" max="100" step="1" style="width:60px;padding:6px;border:1px solid #ccc;border-radius:6px;">%</td>'+
+      '<td class="blue-txt">'+brl(considerado)+'</td>'+
       '<td><select data-codigo="'+r.codigo+'" class="catSelect">'+
         '<option value="entrada"'+(cls==='entrada'?' selected':'')+'>Entrada</option>'+
         '<option value="saida"'+(cls==='saida'?' selected':'')+'>Saída</option>'+
         '<option value="excluir"'+(cls==='excluir'?' selected':'')+'>Excluir</option>'+
       '</select></td></tr>';
   });
-  html += '<tr class="total"><td>TOTAL</td><td>'+brl(totIL)+'</td><td>'+brl(tot7)+'</td><td>'+brl(totT)+'</td><td></td></tr>';
+  html += '<tr class="total"><td>TOTAL</td><td>'+brl(totIL)+'</td><td>'+brl(tot7)+'</td><td>'+brl(totT)+'</td><td></td><td class="blue-txt">'+brl(totConsid)+'</td><td></td></tr>';
   html += '</tbody></table>';
+  html += '<p class="muted" style="margin-top:8px;">% Igreja: quanto da categoria fica retido na igreja local (ex.: Ofertas | Pacto costuma ser 60% igreja / 40% Associação). Padrão 100% se não informado. O total de Entradas usa a coluna "Valor Considerado", não o Total bruto.</p>';
   wrap.innerHTML = html;
   wrap.querySelectorAll('.catSelect').forEach(sel=>{
     sel.addEventListener('change', async e=>{
       categoryFilters[e.target.getAttribute('data-codigo')] = e.target.value;
       recomputeAllFromCategorias();
       renderAll();
-      try{ await saveCategoryFilters(); setSyncStatus('ok','✓ Classificação salva'); }
+      try{ await saveCategorySettings(); setSyncStatus('ok','✓ Classificação salva'); }
+      catch(err){ setSyncStatus('err','⚠ Não consegui salvar: '+err.message); }
+    });
+  });
+  wrap.querySelectorAll('.pctInput').forEach(inp=>{
+    inp.addEventListener('change', async e=>{
+      let v = Number(e.target.value);
+      if(isNaN(v)) v = 100;
+      v = Math.max(0, Math.min(100, v));
+      e.target.value = v;
+      categoryPercentages[e.target.getAttribute('data-codigo')] = v;
+      recomputeAllFromCategorias();
+      renderAll();
+      try{ await saveCategorySettings(); setSyncStatus('ok','✓ Percentual salvo'); }
       catch(err){ setSyncStatus('err','⚠ Não consegui salvar: '+err.message); }
     });
   });
@@ -557,14 +591,12 @@ function renderDespesasKpis(){
 
 const despesasColumns = [
   { key:'departamento', label:'Departamento', left:true },
-  { key:'codigoCategoria', label:'Cód. Cat.' },
   { key:'categoria', label:'Categoria', left:true },
   { key:'descricao', label:'Descrição', left:true, format:r=>'<span title="'+escapeHtml(r.descricao)+'">'+escapeHtml(truncate(r.descricao,55))+'</span>' },
   { key:'tipoDespesa', label:'Tipo' },
   { key:'empresa', label:'Empresa', left:true, format:r=>escapeHtml(r.empresa) },
   { key:'valor', label:'Valor', format:r=>brl(r.valor), cellClass:()=>'orange-txt' },
   { key:'nomeUsuario', label:'Usuário', left:true, format:r=>escapeHtml(r.nomeUsuario) },
-  { key:'dataDoEvento', label:'Data do Evento', sortValue:r=>toSortableDate(r.dataDoEvento) },
   { key:'data', label:'Data', sortValue:r=>toSortableDate(r.data) }
 ];
 let despesasSortState = { key:'data', dir:'asc', onChange: ()=>renderDespesasLancamentos() };
@@ -574,8 +606,8 @@ function renderDespesasLancamentos(){
   const data = state[key];
   const wrap = document.getElementById('despesasLancWrap');
   if(!data || !data.despesasLancamentos || !data.despesasLancamentos.length){ wrap.innerHTML = '<p class="muted">Nenhum lançamento de despesa para o mês selecionado.</p>'; return; }
-  const footer = '<tr class="total"><td colspan="6">TOTAL — '+data.despesasLancamentos.length+' lançamentos</td>'+
-    '<td class="orange-txt">'+brl(sum(data.despesasLancamentos.map(l=>l.valor)))+'</td><td colspan="3"></td></tr>';
+  const footer = '<tr class="total"><td colspan="5">TOTAL — '+data.despesasLancamentos.length+' lançamentos</td>'+
+    '<td class="orange-txt">'+brl(sum(data.despesasLancamentos.map(l=>l.valor)))+'</td><td colspan="2"></td></tr>';
   renderSortableTable('despesasLancWrap', despesasColumns, data.despesasLancamentos, despesasSortState, footer);
 }
 
@@ -622,6 +654,38 @@ function renderDoadoresChart(){
   });
 }
 
+function renderDoadoresCategorias(){
+  const monthKey = document.getElementById('doadoresMonthSelect').value;
+  const wrap = document.getElementById('doadoresCatWrap');
+  const cats = state[monthKey]?.doadores?.categorias;
+  if(!monthKey || !cats || !cats.length){ wrap.innerHTML = '<p class="muted">Nenhuma categoria disponível para o mês selecionado.</p>'; return; }
+  let html = '<table><thead><tr><th style="text-align:left;">Categoria</th><th>Total</th><th>% Igreja</th><th>Valor Considerado</th></tr></thead><tbody>';
+  let totT=0, totConsid=0;
+  cats.forEach((c,i)=>{
+    const pct = categoryPercentagesFidelidade[c.codigo] ?? 100;
+    const considerado = round2((c.valor||0) * (pct/100));
+    totT += c.valor||0; totConsid += considerado;
+    html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'><td style="text-align:left;">'+c.nome+'</td><td>'+brl(c.valor)+'</td>'+
+      '<td><input type="number" class="pctInputFid" data-codigo="'+c.codigo+'" value="'+pct+'" min="0" max="100" step="1" style="width:60px;padding:6px;border:1px solid #ccc;border-radius:6px;">%</td>'+
+      '<td class="green-txt" style="color:var(--green);font-weight:700;">'+brl(considerado)+'</td></tr>';
+  });
+  html += '<tr class="total"><td>TOTAL</td><td>'+brl(totT)+'</td><td></td><td style="color:var(--green);">'+brl(totConsid)+'</td></tr>';
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('.pctInputFid').forEach(inp=>{
+    inp.addEventListener('change', async e=>{
+      let v = Number(e.target.value);
+      if(isNaN(v)) v = 100;
+      v = Math.max(0, Math.min(100, v));
+      e.target.value = v;
+      categoryPercentagesFidelidade[e.target.getAttribute('data-codigo')] = v;
+      renderDoadoresCategorias();
+      try{ await saveCategorySettings(); setSyncStatus('ok','✓ Percentual salvo'); }
+      catch(err){ setSyncStatus('err','⚠ Não consegui salvar: '+err.message); }
+    });
+  });
+}
+
 /* ===================== Orquestração ===================== */
 function renderAll(){
   const steps = [
@@ -637,7 +701,8 @@ function renderAll(){
     ['lançamentos de despesas', renderDespesasLancamentos],
     ['seletor de doadores', renderDoadoresMonthSelect],
     ['doadores (cards)', renderDoadoresRow],
-    ['doadores (gráfico)', renderDoadoresChart]
+    ['doadores (gráfico)', renderDoadoresChart],
+    ['doadores (categorias)', renderDoadoresCategorias]
   ];
   steps.forEach(([label,fn])=>{ try{ fn(); }catch(err){ console.error(label, err); } });
 }
