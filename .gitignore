@@ -1,0 +1,5 @@
+etl/.env
+etl/node_modules/
+etl/daemon/
+node_modules/
+*.log
