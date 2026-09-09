@@ -543,6 +543,10 @@ const deptColumns = [
   { key:'ofertaDistribuida', label:'Oferta Distribuída', format:r=>num(r.ofertaDistribuida), cellClass:r=>r.ofertaDistribuida?'blue-txt':'' },
   { key:'despesas', label:'Despesas', format:r=>num(r.despesas), cellClass:r=>r.despesas?'orange-txt':'' },
   { key:'adiantamento', label:'Adiantamento', format:r=>num(r.adiantamento) },
+  { key:'transfSaida', label:'Transf. Saída', format:r=>num(r.transfSaida), cellClass:r=>r.transfSaida?'orange-txt':'' },
+  { key:'transfEntrada', label:'Transf. Entrada', format:r=>num(r.transfEntrada), cellClass:r=>r.transfEntrada?'blue-txt':'' },
+  { key:'estorno', label:'Estorno', format:r=>num(r.estorno) },
+  { key:'depositosIdentificados', label:'Depósitos Identificados', format:r=>num(r.depositosIdentificados) },
   { key:'saldoFinal', label:'Saldo Final', format:r=>num(r.saldoFinal), cellClass:r=>r.saldoFinal<0?'var-down':'' },
   { key:'variacao', label:'Variação', sortValue:r=>{ const v=pctVar(r.saldoInicial,r.saldoFinal); return v===null?-Infinity:v; },
     format:r=>{ const v=pctVar(r.saldoInicial,r.saldoFinal); return v===null?'novo':(v===0?'0,0%':(v>0?'▲ ':'▼ ')+pctAbs(v)); },
@@ -557,11 +561,14 @@ function renderDeptView(){
   if(!data || !data.departments){ wrap.innerHTML = '<p class="muted">Nenhum dado de departamento ainda.</p>'; return; }
   const rows = data.departments;
   const totSI=sum(rows.map(r=>r.saldoInicial)), totOD=sum(rows.map(r=>r.ofertaDireta)), totODist=sum(rows.map(r=>r.ofertaDistribuida)),
-        totDesp=sum(rows.map(r=>r.despesas)), totAdi=sum(rows.map(r=>r.adiantamento)), totSF=sum(rows.map(r=>r.saldoFinal)), totOrc=sum(rows.map(r=>r.orcamento));
+        totDesp=sum(rows.map(r=>r.despesas)), totAdi=sum(rows.map(r=>r.adiantamento)), totSF=sum(rows.map(r=>r.saldoFinal)), totOrc=sum(rows.map(r=>r.orcamento)),
+        totTS=sum(rows.map(r=>r.transfSaida)), totTE=sum(rows.map(r=>r.transfEntrada)), totEst=sum(rows.map(r=>r.estorno)), totDep=sum(rows.map(r=>r.depositosIdentificados));
   const totVp = pctVar(totSI, totSF);
   const footer = '<tr class="total"><td>TOTAL</td><td>'+num(totOrc,0)+'</td><td>'+num(totSI)+'</td>'+
     '<td class="blue-txt">'+num(totOD)+'</td><td class="blue-txt">'+num(totODist)+'</td><td class="orange-txt">'+num(totDesp)+'</td>'+
-    '<td>'+num(totAdi)+'</td><td'+(totSF<0?' class="var-down"':'')+'>'+num(totSF)+'</td>'+
+    '<td>'+num(totAdi)+'</td>'+
+    '<td class="orange-txt">'+num(totTS)+'</td><td class="blue-txt">'+num(totTE)+'</td><td>'+num(totEst)+'</td><td>'+num(totDep)+'</td>'+
+    '<td'+(totSF<0?' class="var-down"':'')+'>'+num(totSF)+'</td>'+
     '<td class="'+(totVp===null?'':(totVp>=0?'var-up':'var-down'))+'">'+(totVp===null?'—':(totVp>=0?'▲ ':'▼ ')+pctAbs(totVp))+'</td></tr>';
   renderSortableTable('tableDeptWrap', deptColumns, rows, deptSortState, footer);
 }

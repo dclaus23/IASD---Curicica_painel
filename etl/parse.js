@@ -59,6 +59,12 @@ function parseDepartmentFile(filePath, filename) {
       ofertaDistribuida: Number(row[idx["Oferta Distribuída"]]) || 0,
       despesas: Number(row[idx["Despesas"]]) || 0,
       adiantamento: Number(row[idx["Adiantamento"]]) || 0,
+      // Transferências entre departamentos (colunas novas do ACMS) — só exibição,
+      // não entram no cálculo: o Saldo Final abaixo já vem pronto do ACMS.
+      transfSaida: Number(row[idx["Transf. Saída"]]) || 0,
+      transfEntrada: Number(row[idx["Transf. Entrada"]]) || 0,
+      estorno: Number(row[idx["Estorno"]]) || 0,
+      depositosIdentificados: Number(row[idx["Depósitos Identificados"]]) || 0,
       saldoInicial: Number(row[idx["Saldo Inicial"]]) || 0,
       saldoFinal: Number(row[idx["Saldo Final"]]) || 0,
     });
