@@ -69,6 +69,7 @@
   .kpi.orange{border-top-color:var(--orange);}
   .kpi.green{border-top-color:var(--green);} .kpi.green .value{color:var(--green);}
   .kpi.purple{border-top-color:#6B3FA0;} .kpi.purple .value{color:#6B3FA0;}
+  .kpi.red{border-top-color:var(--red);} .kpi.red .value{color:var(--red);}
   .kpi .label{font-size:12px;font-weight:700;color:var(--gray);letter-spacing:.5px;text-transform:uppercase;}
   .kpi .value{font-size:30px;font-weight:800;margin:6px 0;}
   .kpi.blue .value{color:var(--blue);} .kpi.orange .value{color:var(--orange);}
@@ -89,6 +90,7 @@
   .blue-txt{color:var(--blue);font-weight:700;} .lightblue-txt{color:var(--lightblue);font-weight:700;}
   .orange-txt{color:var(--orange);font-weight:700;} .lightorange-txt{color:var(--lightorange);font-weight:700;}
   .var-up{color:var(--green);font-weight:700;} .var-down{color:var(--red);font-weight:700;}
+  .green-txt{color:var(--green);font-weight:700;}
 
   th.sortable{cursor:pointer;user-select:none;}
   th.sortable:hover{background:#1B3A57;}
@@ -203,6 +205,16 @@
       <h2>Valores por Categoria (Dízimo, Ofertas e demais)</h2>
       <p class="muted">Detalhamento por categoria própria da Fidelidade, do mês selecionado acima. Para categorias como Ofertas | Pacto, informe o % que realmente fica com a igreja local (o resto vai para a Associação).</p>
       <div class="table-scroll" id="doadoresCatWrap"></div>
+    </section>
+
+    <section>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <h2 style="border:none;margin:0;padding:0;">Fidelidade dos Dizimistas — últimos 8 meses</h2>
+        <button id="btnExportFidelidade" style="padding:8px 14px;border:1px solid var(--blue);border-radius:6px;background:#fff;color:var(--blue);cursor:pointer;font-weight:600;">⬇ Exportar para Excel</button>
+      </div>
+      <p class="muted" id="fidelidadeSubtitulo" style="margin-top:4px;"></p>
+      <div class="kpis" id="fidelidadeOverview" style="margin-top:14px;"></div>
+      <div class="table-scroll" id="tableFidelidadeWrap" style="margin-top:16px;"></div>
     </section>
 
   </div>
@@ -693,6 +705,133 @@ function renderDoadoresCategorias(){
   });
 }
 
+/* ===================== Fidelidade dos Dizimistas (Fidelidade + 7Me cruzados) ===================== */
+// Mesma lógica de identidade por nome usada no etl/parse.js (lá é a fonte de verdade
+// pro 7Me, que não tem um código de pessoa — só repetimos aqui pra cruzar no navegador).
+function normalizeName(s){
+  return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim().replace(/\s+/g,' ');
+}
+function cleanName(s){ return String(s||'').replace(/\s+/g,' ').trim(); }
+
+// Os N meses completos mais recentes, terminando no mês anterior ao atual (o mês
+// corrente ainda não fechou). A janela anda sozinha conforme o calendário do dia.
+function getWindowMonths(n){
+  const d = new Date(); d.setDate(1);
+  const months = [];
+  for(let i=1;i<=n;i++){
+    const dt = new Date(d.getFullYear(), d.getMonth()-i, 1);
+    months.push(dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0'));
+  }
+  return months.reverse();
+}
+
+const FIDELIDADE_WINDOW_SIZE = 8;
+function faixaDizimista(q){
+  if(q===0) return {label:'0 vezes', cls:'var-down'};
+  if(q<=3) return {label:'1 a 3 vezes', cls:'orange-txt'};
+  if(q<=6) return {label:'4 a 6 vezes', cls:'blue-txt'};
+  return {label:'7 a 8 vezes', cls:'green-txt'};
+}
+
+// Monta a lista: todo mundo que já apareceu como dizimista (Fidelidade, categoria
+// "Dízimo") em QUALQUER mês do histórico entra no "roster" — assim quem parou de
+// dizimar também aparece, com 0 nos últimos 8 meses. Dentro da janela, cruza
+// Fidelidade com 7Me: um pagamento 7Me sem departamento específico só conta se a
+// pessoa não tiver Dízimo na Fidelidade naquele mesmo mês (evita contar duas vezes
+// o mesmo lançamento já reconciliado).
+function computeDizimistasFidelidade(){
+  const windowMonths = getWindowMonths(FIDELIDADE_WINDOW_SIZE);
+
+  const roster = new Map(); // nomeNormalizado -> nome de exibição
+  getSortedMonthKeys().forEach(mk=>{
+    (state[mk].doadores?.dizimistasList||[]).forEach(d=>{ roster.set(normalizeName(d.nome), cleanName(d.nome)); });
+    (state[mk].dizimistas7me||[]).forEach(d=>{ const k=normalizeName(d.nome); if(!roster.has(k)) roster.set(k, cleanName(d.nome)); });
+  });
+
+  const counts = new Map();
+  roster.forEach((nome,key)=>counts.set(key,{nome,quantidade:0,totalDizimo:0}));
+  windowMonths.forEach(mk=>{
+    const fidList = state[mk]?.doadores?.dizimistasList || [];
+    const fidKeys = new Set();
+    fidList.forEach(d=>{
+      const key = normalizeName(d.nome); fidKeys.add(key);
+      const p = counts.get(key); if(p){ p.quantidade+=1; p.totalDizimo+=d.valor; }
+    });
+    (state[mk]?.dizimistas7me||[]).forEach(d=>{
+      const key = normalizeName(d.nome);
+      if(fidKeys.has(key)) return;
+      const p = counts.get(key); if(p){ p.quantidade+=1; p.totalDizimo+=d.valor; }
+    });
+  });
+
+  return { windowMonths, rows: Array.from(counts.values()) };
+}
+
+const fidelidadeColumns = [
+  { key:'nome', label:'Nome da Pessoa', left:true },
+  { key:'quantidade', label:'Qtde. de Vezes Dizimadas', format:r=>num(r.quantidade,0),
+    cellClass:r=>faixaDizimista(r.quantidade).cls },
+  { key:'faixa', label:'Faixa', sortValue:r=>r.quantidade, format:r=>faixaDizimista(r.quantidade).label,
+    cellClass:r=>faixaDizimista(r.quantidade).cls },
+  { key:'totalDizimo', label:'Total Dízimo (no período)', format:r=>brl(r.totalDizimo) },
+];
+let fidelidadeSortState = { key:'quantidade', dir:'asc', onChange: ()=>renderDizimistasFidelidade() };
+let lastFidelidadeRows = [];
+
+function bucketTileHtml(label, count, colorClass){
+  return '<div class="kpi '+colorClass+'"><div class="label">'+label+'</div><div class="value">'+num(count,0)+'</div></div>';
+}
+
+function renderDizimistasFidelidade(){
+  const { windowMonths, rows } = computeDizimistasFidelidade();
+  lastFidelidadeRows = rows;
+
+  const sub = document.getElementById('fidelidadeSubtitulo');
+  sub.textContent = 'Período: '+monthLabel(windowMonths[0])+' a '+monthLabel(windowMonths[windowMonths.length-1])+
+    ' · cruza Fidelidade (extrato oficial) com 7Me/Pix sem departamento específico, pra não perder quem dizimou só por um dos dois canais.';
+
+  const buckets = {z:0, a:0, b:0, c:0};
+  rows.forEach(r=>{
+    if(r.quantidade===0) buckets.z++;
+    else if(r.quantidade<=3) buckets.a++;
+    else if(r.quantidade<=6) buckets.b++;
+    else buckets.c++;
+  });
+  document.getElementById('fidelidadeOverview').innerHTML = [
+    bucketTileHtml('0 vezes', buckets.z, 'red'),
+    bucketTileHtml('1 a 3 vezes', buckets.a, 'orange'),
+    bucketTileHtml('4 a 6 vezes', buckets.b, 'blue'),
+    bucketTileHtml('7 a 8 vezes (em dia)', buckets.c, 'green'),
+  ].join('');
+
+  renderSortableTable('tableFidelidadeWrap', fidelidadeColumns, rows, fidelidadeSortState, '');
+}
+
+function exportDizimistasFidelidadeCSV(){
+  const rows = [...lastFidelidadeRows].sort((a,b)=>{
+    const col = fidelidadeColumns.find(c=>c.key===fidelidadeSortState.key);
+    let va = col.sortValue ? col.sortValue(a) : a[fidelidadeSortState.key];
+    let vb = col.sortValue ? col.sortValue(b) : b[fidelidadeSortState.key];
+    if(typeof va==='string'){ va=va.toLowerCase(); vb=vb.toLowerCase(); }
+    if(va<vb) return fidelidadeSortState.dir==='asc'?-1:1;
+    if(va>vb) return fidelidadeSortState.dir==='asc'?1:-1;
+    return 0;
+  });
+  const header = ['Nome da Pessoa','Quantidade de Vezes Dizimadas','Faixa','Total Dizimo'];
+  const csvEscape = v => '"'+String(v).replace(/"/g,'""')+'"';
+  const lines = [header.map(csvEscape).join(';')];
+  rows.forEach(r=>{
+    lines.push([r.nome, r.quantidade, faixaDizimista(r.quantidade).label, r.totalDizimo.toFixed(2).replace('.',',')].map(csvEscape).join(';'));
+  });
+  const csv = '﻿' + lines.join('\r\n'); // BOM pro Excel reconhecer acentuação
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'dizimistas-fidelidade.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /* ===================== Orquestração ===================== */
 function renderAll(){
   const steps = [
@@ -709,7 +848,8 @@ function renderAll(){
     ['seletor de doadores', renderDoadoresMonthSelect],
     ['doadores (cards)', renderDoadoresRow],
     ['doadores (gráfico)', renderDoadoresChart],
-    ['doadores (categorias)', renderDoadoresCategorias]
+    ['doadores (categorias)', renderDoadoresCategorias],
+    ['dizimistas fiéis (Fidelidade + 7Me)', renderDizimistasFidelidade]
   ];
   steps.forEach(([label,fn])=>{ try{ fn(); }catch(err){ console.error(label, err); } });
 }
@@ -735,6 +875,8 @@ async function refresh(){
 ['finMonthSelect','deptMonthSelect','despesasLancMonthSelect','doadoresMonthSelect'].forEach(id=>{
   document.getElementById(id).addEventListener('change', renderAll);
 });
+
+document.getElementById('btnExportFidelidade').addEventListener('click', exportDizimistasFidelidadeCSV);
 
 document.querySelectorAll('.tab-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{

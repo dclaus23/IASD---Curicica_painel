@@ -23,6 +23,14 @@ function monthKeyFromFilename(name) {
   const m = name.match(/^(\d{4})-(\d{2})/);
   return m ? `${m[1]}-${m[2]}` : null;
 }
+// Chave de identidade entre bases que não compartilham um ID (ex.: 7Me só tem nome).
+// Minúsculas, sem acento, espaços colapsados — não é infalível (duas pessoas com nome
+// igual contam como uma só), mas é o melhor que dá pra fazer sem um código em comum.
+function normalizeName(s) {
+  return String(s || "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase().trim().replace(/\s+/g, " ");
+}
 
 function detectFileType(filePath) {
   const wb = XLSX.readFile(filePath);
@@ -176,7 +184,7 @@ function parseFidelidadeFile(filePath) {
   // categoria (oferta) entra em ofertantes. Uma pessoa pode contar nos dois
   // grupos no mesmo mês. Usamos Set de "Código Pessoa" para nunca contar a
   // mesma pessoa duas vezes, mesmo com vários lançamentos no mês.
-  const byMonth = {}; // monthKey -> { dizimistas:Set, ofertantes:Set, totalDizimo, totalOferta, categorias:{codigo:{codigo,nome,valor}} }
+  const byMonth = {}; // monthKey -> { dizimistas:Set, ofertantes:Set, totalDizimo, totalOferta, categorias:{codigo:{codigo,nome,valor}}, dizimistasInfo:Map(codigo->{codigo,nome,valor}) }
   for (let r = 1; r < rows.length; r++) {
     const row = rows[r];
     if (!row || row.length === 0) continue;
@@ -186,14 +194,19 @@ function parseFidelidadeFile(filePath) {
     if (!m) continue;
     const monthKey = `${m[3]}-${m[2]}`;
     const pessoa = row[idx["Código Pessoa"]];
+    const nomeCompleto = row[idx["Nome Completo"]];
     const codigo = String(row[idx["Código de Categoria"]]);
     const categoria = row[idx["Nome da Categoria"]];
     const valor = Number(row[idx["Valor"]]) || 0;
 
-    if (!byMonth[monthKey]) byMonth[monthKey] = { dizimistas: new Set(), ofertantes: new Set(), totalDizimo: 0, totalOferta: 0, categorias: {} };
+    if (!byMonth[monthKey]) byMonth[monthKey] = { dizimistas: new Set(), ofertantes: new Set(), totalDizimo: 0, totalOferta: 0, categorias: {}, dizimistasInfo: new Map() };
     const m2 = byMonth[monthKey];
-    if (categoria === "Dízimo") { m2.dizimistas.add(pessoa); m2.totalDizimo += valor; }
-    else { m2.ofertantes.add(pessoa); m2.totalOferta += valor; }
+    if (categoria === "Dízimo") {
+      m2.dizimistas.add(pessoa);
+      m2.totalDizimo += valor;
+      if (!m2.dizimistasInfo.has(pessoa)) m2.dizimistasInfo.set(pessoa, { codigo: pessoa, nome: nomeCompleto, valor: 0 });
+      m2.dizimistasInfo.get(pessoa).valor += valor;
+    } else { m2.ofertantes.add(pessoa); m2.totalOferta += valor; }
     if (!m2.categorias[codigo]) m2.categorias[codigo] = { codigo, nome: categoria, valor: 0 };
     m2.categorias[codigo].valor += valor;
   }
@@ -211,12 +224,56 @@ function parseFidelidadeFile(filePath) {
       mediaDizimo: countDizimistas ? round2(m2.totalDizimo / countDizimistas) : 0,
       mediaOferta: countOfertantes ? round2(m2.totalOferta / countOfertantes) : 0,
       categorias: Object.values(m2.categorias).map((c) => ({ ...c, valor: round2(c.valor) })),
+      // Lista individual de quem deu Dízimo nesse mês (pra cruzar com 7Me e rastrear fidelidade por pessoa).
+      dizimistasList: Array.from(m2.dizimistasInfo.values()).map((d) => ({ ...d, valor: round2(d.valor) })),
     };
+  });
+  return result;
+}
+
+// Extrato de pagamentos digitais (7Me/PIX). Só olhamos lançamentos SEM departamento
+// específico (DEPARTMENT CODE === 0) — esses são os candidatos a Dízimo (o que tem
+// departamento é sempre "Oferta Departamentos", nunca dízimo). O arquivo não tem um
+// código único de pessoa (só o nome), então usamos normalizeName() como chave —
+// risco conhecido: duas pessoas com nome idêntico contam como uma só.
+function parse7MeFile(filePath) {
+  const wb = XLSX.readFile(filePath);
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: 0 });
+  const header = rows[0];
+  if (!is7MeSheet(header)) return null;
+  const idx = Object.fromEntries(header.map((h, i) => [h, i]));
+
+  const byMonth = {}; // monthKey -> Map(nomeNormalizado -> {nome, valor})
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || row.length === 0) continue;
+    const dataStr = row[idx["Data"]];
+    if (!dataStr) continue;
+    const m = String(dataStr).match(/^(\d{2})\/(\d{2})\/(\d{4})/); // DD/MM/AAAA
+    if (!m) continue;
+    const deptCode = Number(row[idx["DEPARTMENT CODE"]]) || 0;
+    if (deptCode !== 0) continue; // tinha departamento específico -> não é dízimo
+    const nome = row[idx["Nome dizimista e ofertante"]];
+    if (!nome) continue;
+    const monthKey = `${m[3]}-${m[2]}`;
+    const valor = Number(row[idx["Valor"]]) || 0;
+    const key = normalizeName(nome);
+
+    if (!byMonth[monthKey]) byMonth[monthKey] = new Map();
+    if (!byMonth[monthKey].has(key)) byMonth[monthKey].set(key, { nome, valor: 0 });
+    byMonth[monthKey].get(key).valor += valor;
+  }
+
+  const result = {};
+  Object.keys(byMonth).forEach((k) => {
+    result[k] = Array.from(byMonth[k].values()).map((d) => ({ ...d, valor: round2(d.valor) }));
   });
   return result;
 }
 
 module.exports = {
   round2, isDepartmentSheet, isTreasurySheet, isDespesasSheet, isFidelidadeSheet, is7MeSheet, monthKeyFromFilename,
-  detectFileType, parseDepartmentFile, parseTreasuryFile, parseDespesasFile, parseFidelidadeFile, suggestClassification,
+  normalizeName, detectFileType, parseDepartmentFile, parseTreasuryFile, parseDespesasFile, parseFidelidadeFile,
+  parse7MeFile, suggestClassification,
 };

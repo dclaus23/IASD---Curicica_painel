@@ -8,7 +8,7 @@ const path = require("path");
 const chokidar = require("chokidar");
 const { createClient } = require("@supabase/supabase-js");
 const {
-  detectFileType, parseDepartmentFile, parseTreasuryFile, parseDespesasFile, parseFidelidadeFile, suggestClassification, round2,
+  detectFileType, parseDepartmentFile, parseTreasuryFile, parseDespesasFile, parseFidelidadeFile, parse7MeFile, suggestClassification, round2,
 } = require("./parse");
 
 const WATCH_FOLDER = process.env.WATCH_FOLDER;
@@ -157,7 +157,15 @@ async function processFile(filePath) {
         log(`✓ Doadores de ${monthKey} atualizados — ${stats.countDizimistas} dizimistas (média R$ ${stats.mediaDizimo.toFixed(2)}) · ${stats.countOfertantes} ofertantes (média R$ ${stats.mediaOferta.toFixed(2)}) — de "${filename}"`);
       }
     } else if (type === "7me") {
-      log(`ℹ "${filename}" é o extrato de pagamentos digitais (7Me) — reconhecido, mas não processado separadamente, pois esses lançamentos já vêm inclusos no arquivo de Fidelidade.`);
+      const byMonth = parse7MeFile(filePath);
+      if (!byMonth || Object.keys(byMonth).length === 0) { log(`⚠ Não encontrei lançamentos sem departamento específico em "${filename}".`); return; }
+
+      for (const monthKey of Object.keys(byMonth)) {
+        const existing = await getMonthRow(monthKey);
+        existing.dizimistas7me = byMonth[monthKey];
+        await saveMonthRow(monthKey, existing);
+      }
+      log(`✓ 7Me processado (pagamentos sem departamento específico, candidatos a Dízimo) — ${Object.keys(byMonth).length} meses atualizados — de "${filename}"`);
     }
   } catch (err) {
     log(`❌ Erro ao processar "${filename}": ${err.message}`);
