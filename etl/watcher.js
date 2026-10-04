@@ -182,6 +182,17 @@ const watcher = chokidar.watch(WATCH_FOLDER, {
   depth: 2,
 });
 
-watcher.on("add", processFile);
-watcher.on("change", processFile);
+// Processa um arquivo por vez, em fila — evita que dois arquivos (ex.: Fidelidade e
+// Despesas) leiam e gravem o mesmo mês ao mesmo tempo e um sobrescreva o outro
+// (race condition: "leio o mês, atualizo meu campo, salvo" sem travar o mês).
+let queue = Promise.resolve();
+function enqueue(filePath) {
+  queue = queue
+    .then(() => processFile(filePath))
+    .catch((err) => log(`❌ Erro na fila ao processar "${path.basename(filePath)}": ${err.message}`));
+  return queue;
+}
+
+watcher.on("add", enqueue);
+watcher.on("change", enqueue);
 watcher.on("error", (err) => log(`❌ Erro no vigia: ${err.message}`));
