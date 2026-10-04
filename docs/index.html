@@ -104,12 +104,30 @@
 </head>
 <body>
 
+<div id="authOverlay" style="position:fixed;inset:0;background:var(--navy);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;">
+  <div style="background:#fff;border-radius:10px;padding:32px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.35);">
+    <h2 style="margin:0 0 6px;color:var(--navy);border:none;padding:0;">Tesouraria — IASD Curicica</h2>
+    <p class="muted" style="margin:0 0 20px;">Acesso restrito. Entre com seu e-mail e senha.</p>
+    <form id="authForm">
+      <input type="email" id="authEmail" placeholder="E-mail" required autocomplete="username" style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:6px;border:1px solid #ccc;font-size:14px;margin-bottom:10px;">
+      <input type="password" id="authPassword" placeholder="Senha" required autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:6px;border:1px solid #ccc;font-size:14px;margin-bottom:10px;">
+      <button type="submit" id="authSubmitBtn" style="width:100%;">Entrar</button>
+    </form>
+    <p id="authError" style="color:var(--red);font-size:13px;margin-top:12px;display:none;"></p>
+  </div>
+</div>
+
+<div id="appRoot" style="display:none;">
+
 <header>
   <div>
     <h1>Tesouraria — IASD Curicica</h1>
     <p>Painel de Entradas x Saídas — Conectando Pessoas</p>
   </div>
-  <div id="syncStatus">Carregando...</div>
+  <div style="display:flex;align-items:center;gap:14px;">
+    <div id="syncStatus">Carregando...</div>
+    <button id="btnLogout" type="button" style="background:transparent;border:1px solid #4A6578;color:#fff;padding:6px 14px;font-size:12.5px;font-weight:600;border-radius:6px;">Sair</button>
+  </div>
 </header>
 
 <nav class="tabs">
@@ -214,6 +232,17 @@
       </div>
       <p class="muted" id="fidelidadeSubtitulo" style="margin-top:4px;"></p>
       <div class="kpis" id="fidelidadeOverview" style="margin-top:14px;"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px;">
+        <input type="text" id="fidFiltroNome" placeholder="Filtrar por nome..." style="padding:8px 12px;border-radius:6px;border:1px solid #ccc;font-size:14px;flex:1;min-width:200px;">
+        <select id="fidFiltroQtd"><option value="">Qtde.: todas</option></select>
+        <select id="fidFiltroFaixa">
+          <option value="">Faixa: todas</option>
+          <option value="0 vezes">0 vezes</option>
+          <option value="1 a 3 vezes">1 a 3 vezes</option>
+          <option value="4 a 6 vezes">4 a 6 vezes</option>
+          <option value="7 a 8 vezes">7 a 8 vezes</option>
+        </select>
+      </div>
       <div class="table-scroll" id="tableFidelidadeWrap" style="margin-top:16px;"></div>
     </section>
 
@@ -223,6 +252,7 @@
 
 <footer>IASD Curicica — Conectando Pessoas · Dados sincronizados automaticamente pelo vigia de pasta</footer>
 
+</div><!-- /appRoot -->
 
 <script>
 /* ===================== Configuração — preencha com os dados do seu projeto Supabase ===================== */
@@ -275,17 +305,73 @@ let categoryPercentages = {};
 let categoryPercentagesFidelidade = {};
 let charts = {};
 
+/* ===================== Autenticação (Supabase Auth, via REST simples) ===================== */
+// O painel exige login (e-mail/senha cadastrados no Supabase Auth). Sem sessão
+// válida, as tabelas do banco (RLS) não liberam leitura — então a tela de login
+// não é só estética, é a proteção de verdade.
+const AUTH_STORAGE_KEY = 'iasd_auth_session';
+
+function getStoredSession(){
+  try{ const raw = localStorage.getItem(AUTH_STORAGE_KEY); return raw ? JSON.parse(raw) : null; }
+  catch(e){ return null; }
+}
+function storeSession(s){ try{ localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(s)); }catch(e){} }
+function clearSession(){ try{ localStorage.removeItem(AUTH_STORAGE_KEY); }catch(e){} }
+
+async function authRequest(path, body){
+  const res = await fetch(SUPABASE_URL + '/auth/v1/' + path, {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const json = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(json.error_description || json.msg || json.error || ('Erro ' + res.status));
+  return json;
+}
+
+async function login(email, password){
+  const data = await authRequest('token?grant_type=password', { email, password });
+  storeSession({ access_token:data.access_token, refresh_token:data.refresh_token, expires_at: Date.now() + data.expires_in*1000 });
+}
+
+async function refreshSession(session){
+  const data = await authRequest('token?grant_type=refresh_token', { refresh_token: session.refresh_token });
+  const newSession = { access_token:data.access_token, refresh_token:data.refresh_token, expires_at: Date.now() + data.expires_in*1000 };
+  storeSession(newSession);
+  return newSession;
+}
+
+// Garante um access_token válido, renovando com o refresh_token se estiver perto
+// de expirar. Retorna null se não houver sessão (ou se a renovação falhar).
+async function ensureValidSession(){
+  let session = getStoredSession();
+  if(!session) return null;
+  if(session.expires_at - Date.now() < 60000){
+    try{ session = await refreshSession(session); }
+    catch(e){ clearSession(); return null; }
+  }
+  return session;
+}
+
+function logout(){ clearSession(); location.reload(); }
+
+function showAuthOverlay(){ document.getElementById('authOverlay').style.display = 'flex'; document.getElementById('appRoot').style.display = 'none'; }
+function hideAuthOverlay(){ document.getElementById('authOverlay').style.display = 'none'; document.getElementById('appRoot').style.display = 'block'; }
+
 /* ===================== Supabase (via REST simples, sem SDK) ===================== */
 async function sbFetch(path, opts={}){
+  const session = await ensureValidSession();
+  if(!session){ showAuthOverlay(); throw new Error('Sessão expirada — faça login novamente.'); }
   const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
     ...opts,
     headers: {
       'apikey': SUPABASE_ANON_KEY,
-      'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + session.access_token,
       'Content-Type': 'application/json',
       ...(opts.headers||{})
     }
   });
+  if(res.status === 401){ clearSession(); showAuthOverlay(); throw new Error('Sessão expirada — faça login novamente.'); }
   if(!res.ok) throw new Error('Supabase ' + res.status + ': ' + await res.text());
   return res.status === 204 ? null : res.json();
 }
@@ -382,18 +468,19 @@ function renderSortableTable(wrapId, columns, rows, sortState, footerHtml){
       return 0;
     });
   }
+  const aligns = columns.map(c=>c.align || (c.left?'left':'right'));
   let html = '<table><thead><tr>';
-  columns.forEach(c=>{
+  columns.forEach((c,ci)=>{
     const arrow = sortState.key===c.key ? ('<span class="arrow">'+(sortState.dir==='asc'?'▲':'▼')+'</span>') : '';
-    html += '<th class="sortable" data-key="'+c.key+'"'+(c.left?' style="text-align:left;"':'')+'>'+c.label+arrow+'</th>';
+    html += '<th class="sortable" data-key="'+c.key+'"'+(aligns[ci]!=='right'?' style="text-align:'+aligns[ci]+';"':'')+'>'+c.label+arrow+'</th>';
   });
   html += '</tr></thead><tbody>';
   sorted.forEach((row,i)=>{
     html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'>';
-    columns.forEach(c=>{
+    columns.forEach((c,ci)=>{
       const display = c.format ? c.format(row) : (row[c.key]===undefined||row[c.key]===null||row[c.key]==='' ? '—' : row[c.key]);
       const cls = c.cellClass ? c.cellClass(row) : '';
-      html += '<td'+(c.left?' style="text-align:left;"':'')+(cls?' class="'+cls+'"':'')+'>'+display+'</td>';
+      html += '<td'+(aligns[ci]!=='right'?' style="text-align:'+aligns[ci]+';"':'')+(cls?' class="'+cls+'"':'')+'>'+display+'</td>';
     });
     html += '</tr>';
   });
@@ -705,9 +792,10 @@ function renderDoadoresCategorias(){
   });
 }
 
-/* ===================== Fidelidade dos Dizimistas (Fidelidade + 7Me cruzados) ===================== */
-// Mesma lógica de identidade por nome usada no etl/parse.js (lá é a fonte de verdade
-// pro 7Me, que não tem um código de pessoa — só repetimos aqui pra cruzar no navegador).
+/* ===================== Fidelidade dos Dizimistas ===================== */
+// Por decisão do tesoureiro, usamos só o extrato oficial de Fidelidade (categoria
+// "Dízimo") aqui — não cruzamos mais com o 7Me, pra não confundir a análise com
+// lançamentos que misturam dízimo e oferta avulsa no mesmo valor.
 function normalizeName(s){
   return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim().replace(/\s+/g,' ');
 }
@@ -734,61 +822,61 @@ function faixaDizimista(q){
 }
 
 // Monta a lista: todo mundo que já apareceu como dizimista (Fidelidade, categoria
-// "Dízimo") em QUALQUER mês do histórico entra no "roster" — assim quem parou de
-// dizimar também aparece, com 0 nos últimos 8 meses. Dentro da janela, cruza
-// Fidelidade com 7Me: um pagamento 7Me sem departamento específico só conta se a
-// pessoa não tiver Dízimo na Fidelidade naquele mesmo mês (evita contar duas vezes
-// o mesmo lançamento já reconciliado).
+// "Dízimo") em QUALQUER mês do histórico entra no roster — assim quem parou de
+// dizimar também aparece, com 0 nos últimos 8 meses. "Último Dízimo" olha o
+// histórico inteiro (não só a janela), pra mostrar há quanto tempo a pessoa não
+// dizima mesmo quando isso é antes dos últimos 8 meses.
 function computeDizimistasFidelidade(){
   const windowMonths = getWindowMonths(FIDELIDADE_WINDOW_SIZE);
+  const windowSet = new Set(windowMonths);
 
-  const roster = new Map(); // nomeNormalizado -> nome de exibição
+  const info = new Map(); // nomeNormalizado -> {nome, quantidade, totalDizimo, ultimoMes}
   getSortedMonthKeys().forEach(mk=>{
-    (state[mk].doadores?.dizimistasList||[]).forEach(d=>{ roster.set(normalizeName(d.nome), cleanName(d.nome)); });
-    (state[mk].dizimistas7me||[]).forEach(d=>{ const k=normalizeName(d.nome); if(!roster.has(k)) roster.set(k, cleanName(d.nome)); });
-  });
-
-  const counts = new Map();
-  roster.forEach((nome,key)=>counts.set(key,{nome,quantidade:0,totalDizimo:0}));
-  windowMonths.forEach(mk=>{
-    const fidList = state[mk]?.doadores?.dizimistasList || [];
-    const fidKeys = new Set();
-    fidList.forEach(d=>{
-      const key = normalizeName(d.nome); fidKeys.add(key);
-      const p = counts.get(key); if(p){ p.quantidade+=1; p.totalDizimo+=d.valor; }
-    });
-    (state[mk]?.dizimistas7me||[]).forEach(d=>{
+    (state[mk].doadores?.dizimistasList||[]).forEach(d=>{
       const key = normalizeName(d.nome);
-      if(fidKeys.has(key)) return;
-      const p = counts.get(key); if(p){ p.quantidade+=1; p.totalDizimo+=d.valor; }
+      if(!info.has(key)) info.set(key, { nome: cleanName(d.nome), quantidade:0, totalDizimo:0, ultimoMes:null });
+      const p = info.get(key);
+      if(!p.ultimoMes || mk > p.ultimoMes) p.ultimoMes = mk;
+      if(windowSet.has(mk)){ p.quantidade += 1; p.totalDizimo += d.valor; }
     });
   });
 
-  return { windowMonths, rows: Array.from(counts.values()) };
+  return { windowMonths, rows: Array.from(info.values()) };
 }
 
 const fidelidadeColumns = [
   { key:'nome', label:'Nome da Pessoa', left:true },
-  { key:'quantidade', label:'Qtde. de Vezes Dizimadas', format:r=>num(r.quantidade,0),
+  { key:'quantidade', label:'Qtde. de Vezes Dizimadas', align:'center', format:r=>num(r.quantidade,0),
     cellClass:r=>faixaDizimista(r.quantidade).cls },
-  { key:'faixa', label:'Faixa', sortValue:r=>r.quantidade, format:r=>faixaDizimista(r.quantidade).label,
+  { key:'faixa', label:'Faixa', align:'center', sortValue:r=>r.quantidade, format:r=>faixaDizimista(r.quantidade).label,
     cellClass:r=>faixaDizimista(r.quantidade).cls },
   { key:'totalDizimo', label:'Total Dízimo (no período)', format:r=>brl(r.totalDizimo) },
+  { key:'ultimoMes', label:'Último Dízimo', align:'center', sortValue:r=>r.ultimoMes||'', format:r=>r.ultimoMes?monthLabel(r.ultimoMes):'—' },
 ];
 let fidelidadeSortState = { key:'quantidade', dir:'asc', onChange: ()=>renderDizimistasFidelidade() };
-let lastFidelidadeRows = [];
+let fidelidadeAllRows = [];
+let fidelidadeFilters = { nome:'', quantidade:'', faixa:'' };
 
 function bucketTileHtml(label, count, colorClass){
   return '<div class="kpi '+colorClass+'"><div class="label">'+label+'</div><div class="value">'+num(count,0)+'</div></div>';
 }
 
+function applyFidelidadeFilters(rows){
+  return rows.filter(r=>{
+    if(fidelidadeFilters.nome && !normalizeName(r.nome).includes(normalizeName(fidelidadeFilters.nome))) return false;
+    if(fidelidadeFilters.quantidade!=='' && r.quantidade !== Number(fidelidadeFilters.quantidade)) return false;
+    if(fidelidadeFilters.faixa && faixaDizimista(r.quantidade).label !== fidelidadeFilters.faixa) return false;
+    return true;
+  });
+}
+
 function renderDizimistasFidelidade(){
   const { windowMonths, rows } = computeDizimistasFidelidade();
-  lastFidelidadeRows = rows;
+  fidelidadeAllRows = rows;
 
   const sub = document.getElementById('fidelidadeSubtitulo');
   sub.textContent = 'Período: '+monthLabel(windowMonths[0])+' a '+monthLabel(windowMonths[windowMonths.length-1])+
-    ' · cruza Fidelidade (extrato oficial) com 7Me/Pix sem departamento específico, pra não perder quem dizimou só por um dos dois canais.';
+    ' · baseado só no extrato de Fidelidade (categoria Dízimo).';
 
   const buckets = {z:0, a:0, b:0, c:0};
   rows.forEach(r=>{
@@ -804,11 +892,22 @@ function renderDizimistasFidelidade(){
     bucketTileHtml('7 a 8 vezes (em dia)', buckets.c, 'green'),
   ].join('');
 
-  renderSortableTable('tableFidelidadeWrap', fidelidadeColumns, rows, fidelidadeSortState, '');
+  const qtdSelect = document.getElementById('fidFiltroQtd');
+  if(qtdSelect.options.length <= 1){
+    for(let i=0;i<=FIDELIDADE_WINDOW_SIZE;i++){
+      const opt = document.createElement('option'); opt.value = i; opt.textContent = i+'x'; qtdSelect.appendChild(opt);
+    }
+  }
+
+  const filtered = applyFidelidadeFilters(rows);
+  const footer = filtered.length===rows.length ? '' :
+    '<tr><td colspan="'+fidelidadeColumns.length+'" style="text-align:center;color:var(--lightgray);background:#fff;">'+
+    filtered.length+' de '+rows.length+' pessoas (filtro ativo)</td></tr>';
+  renderSortableTable('tableFidelidadeWrap', fidelidadeColumns, filtered, fidelidadeSortState, footer);
 }
 
 function exportDizimistasFidelidadeCSV(){
-  const rows = [...lastFidelidadeRows].sort((a,b)=>{
+  const rows = [...applyFidelidadeFilters(fidelidadeAllRows)].sort((a,b)=>{
     const col = fidelidadeColumns.find(c=>c.key===fidelidadeSortState.key);
     let va = col.sortValue ? col.sortValue(a) : a[fidelidadeSortState.key];
     let vb = col.sortValue ? col.sortValue(b) : b[fidelidadeSortState.key];
@@ -817,11 +916,11 @@ function exportDizimistasFidelidadeCSV(){
     if(va>vb) return fidelidadeSortState.dir==='asc'?1:-1;
     return 0;
   });
-  const header = ['Nome da Pessoa','Quantidade de Vezes Dizimadas','Faixa','Total Dizimo'];
+  const header = ['Nome da Pessoa','Quantidade de Vezes Dizimadas','Faixa','Total Dizimo','Último Dízimo'];
   const csvEscape = v => '"'+String(v).replace(/"/g,'""')+'"';
   const lines = [header.map(csvEscape).join(';')];
   rows.forEach(r=>{
-    lines.push([r.nome, r.quantidade, faixaDizimista(r.quantidade).label, r.totalDizimo.toFixed(2).replace('.',',')].map(csvEscape).join(';'));
+    lines.push([r.nome, r.quantidade, faixaDizimista(r.quantidade).label, r.totalDizimo.toFixed(2).replace('.',','), r.ultimoMes?monthLabel(r.ultimoMes):''].map(csvEscape).join(';'));
   });
   const csv = '﻿' + lines.join('\r\n'); // BOM pro Excel reconhecer acentuação
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
@@ -849,7 +948,7 @@ function renderAll(){
     ['doadores (cards)', renderDoadoresRow],
     ['doadores (gráfico)', renderDoadoresChart],
     ['doadores (categorias)', renderDoadoresCategorias],
-    ['dizimistas fiéis (Fidelidade + 7Me)', renderDizimistasFidelidade]
+    ['dizimistas fiéis (Fidelidade)', renderDizimistasFidelidade]
   ];
   steps.forEach(([label,fn])=>{ try{ fn(); }catch(err){ console.error(label, err); } });
 }
@@ -878,6 +977,10 @@ async function refresh(){
 
 document.getElementById('btnExportFidelidade').addEventListener('click', exportDizimistasFidelidadeCSV);
 
+document.getElementById('fidFiltroNome').addEventListener('input', e=>{ fidelidadeFilters.nome = e.target.value; renderDizimistasFidelidade(); });
+document.getElementById('fidFiltroQtd').addEventListener('change', e=>{ fidelidadeFilters.quantidade = e.target.value; renderDizimistasFidelidade(); });
+document.getElementById('fidFiltroFaixa').addEventListener('change', e=>{ fidelidadeFilters.faixa = e.target.value; renderDizimistasFidelidade(); });
+
 document.querySelectorAll('.tab-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
@@ -887,8 +990,29 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
   });
 });
 
+document.getElementById('btnLogout').addEventListener('click', logout);
+
+document.getElementById('authForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const btn = document.getElementById('authSubmitBtn');
+  const errEl = document.getElementById('authError');
+  errEl.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Entrando...';
+  try{
+    await login(document.getElementById('authEmail').value.trim(), document.getElementById('authPassword').value);
+    document.getElementById('authPassword').value = '';
+    hideAuthOverlay();
+    startApp();
+  }catch(err){
+    errEl.textContent = 'Não consegui entrar: ' + (err.message==='Invalid login credentials' ? 'e-mail ou senha incorretos.' : err.message);
+    errEl.style.display = 'block';
+  }finally{
+    btn.disabled = false; btn.textContent = 'Entrar';
+  }
+});
+
 /* ===================== Início ===================== */
-(function init(){
+function startApp(){
   if(typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined'){
     Chart.register(ChartDataLabels);
   }
@@ -906,6 +1030,13 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
   }
   refresh();
   setInterval(refresh, REFRESH_SECONDS * 1000);
+}
+
+(function init(){
+  ensureValidSession().then(session=>{
+    if(session){ hideAuthOverlay(); startApp(); }
+    else { showAuthOverlay(); }
+  });
 })();
 </script>
 
