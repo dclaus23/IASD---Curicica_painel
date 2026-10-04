@@ -160,6 +160,7 @@ function parseDespesasFile(filePath) {
       categoria: nome,
       descricao: row[idx["Descrição"]] || "",
       tipoDespesa: row[idx["Tipo de Despesa"]] || "",
+      numero: String(row[idx["Número"]] ?? ""),
       empresa: row[idx["Empresa"]] || "",
       nomeUsuario: row[idx["Nome do usuário"]] || "",
       valor: round2(valor),

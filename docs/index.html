@@ -196,8 +196,14 @@
     </section>
 
     <section>
+      <h2 style="border:none;margin:0 0 4px;padding:0;">Despesas por Tipo</h2>
+      <p class="muted">Soma do mês selecionado por classificação (defina a classificação de cada lançamento na tabela abaixo). Lançamentos marcados como "Excluir" não entram em nenhum desses totais.</p>
+      <div class="kpis" id="despesasTipoKpiRow" style="margin-top:14px;"></div>
+    </section>
+
+    <section>
       <h2>Lançamentos de Despesas</h2>
-      <p class="muted">Cada despesa paga no mês selecionado. Clique no cabeçalho de qualquer coluna para ordenar.</p>
+      <p class="muted">Cada despesa paga no mês selecionado. Clique no cabeçalho de qualquer coluna para ordenar. A coluna "Classificação" com fundo laranja é uma sugestão automática (baseada em outro lançamento igual já classificado) — ajuste se precisar.</p>
       <div class="table-scroll" id="despesasLancWrap"></div>
     </section>
 
@@ -303,6 +309,8 @@ let categoryRegistry = {};
 let categoryFilters = {};
 let categoryPercentages = {};
 let categoryPercentagesFidelidade = {};
+let despesasClassificacao = {};
+let despesaClassResolved = new Map();
 let charts = {};
 
 /* ===================== Autenticação (Supabase Auth, via REST simples) ===================== */
@@ -382,12 +390,13 @@ async function loadFromSupabase(){
   rows.forEach(r => { newState[r.month_key] = r.data; });
   state = newState;
 
-  const settingsRows = await sbFetch('app_settings?select=category_registry,category_filters,category_percentages,category_percentages_fidelidade&id=eq.1');
+  const settingsRows = await sbFetch('app_settings?select=category_registry,category_filters,category_percentages,category_percentages_fidelidade,despesas_classificacao&id=eq.1');
   if(settingsRows && settingsRows[0]){
     categoryRegistry = settingsRows[0].category_registry || {};
     categoryFilters = settingsRows[0].category_filters || {};
     categoryPercentages = settingsRows[0].category_percentages || {};
     categoryPercentagesFidelidade = settingsRows[0].category_percentages_fidelidade || {};
+    despesasClassificacao = settingsRows[0].despesas_classificacao || {};
   }
 }
 
@@ -398,6 +407,16 @@ async function saveCategorySettings(){
       category_filters: categoryFilters,
       category_percentages: categoryPercentages,
       category_percentages_fidelidade: categoryPercentagesFidelidade,
+      updated_at: new Date().toISOString()
+    })
+  });
+}
+
+async function saveDespesasClassificacao(){
+  await sbFetch('app_settings?id=eq.1', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      despesas_classificacao: despesasClassificacao,
       updated_at: new Date().toISOString()
     })
   });
@@ -695,6 +714,66 @@ function renderDespesasKpis(){
   ].join('');
 }
 
+/* ===================== Classificação de Despesas (Fixo/Parcela/Pontual/Excluir) ===================== */
+// Chave estável do lançamento (o extrato de despesas não tem um ID próprio) —
+// combina data + número do documento + empresa + valor, suficiente pra não colidir
+// na prática. "Padrão" (empresa+categoria) é usado só pra sugerir automaticamente.
+function despesaKey(l){ return (l.data||'')+'|'+(l.numero||'')+'|'+(l.empresa||'')+'|'+round2(l.valor||0); }
+function despesaPatternKey(l){ return normalizeName(l.empresa||'')+'|'+normalizeName(l.categoria||''); }
+const DESPESA_TIPOS = ['fixo','parcela','pontual','excluir'];
+const DESPESA_TIPO_LABEL = { fixo:'Fixo', parcela:'Parcela', pontual:'Pontual', excluir:'Excluir' };
+
+// Resolve a classificação "efetiva" de cada lançamento de despesa, de todos os
+// meses: explícita (o tesoureiro já escolheu pra aquele lançamento específico) ou
+// sugerida (herdada do lançamento mais recente com a mesma Empresa+Categoria que
+// já foi classificado manualmente — evita reclassificar a mesma fatura mensal
+// recorrente todo mês). Um lançamento sem nenhuma das duas fica sem classificação
+// e não entra em nenhum dos 3 KPIs.
+function refreshDespesaClassResolved(){
+  const lastByPattern = new Map();
+  const resolved = new Map();
+  getSortedMonthKeys().forEach(mk=>{
+    (state[mk]?.despesasLancamentos||[]).forEach(l=>{
+      const key = despesaKey(l);
+      const pattern = despesaPatternKey(l);
+      const explicit = despesasClassificacao[key];
+      if(explicit){
+        resolved.set(key, { valor: explicit, origem: 'manual' });
+        lastByPattern.set(pattern, explicit);
+      } else if(lastByPattern.has(pattern)){
+        resolved.set(key, { valor: lastByPattern.get(pattern), origem: 'sugerido' });
+      }
+    });
+  });
+  despesaClassResolved = resolved;
+}
+
+function somaDespesasPorTipo(monthKey, tipo){
+  const lanc = state[monthKey]?.despesasLancamentos || [];
+  return round2(sum(lanc.filter(l=>(despesaClassResolved.get(despesaKey(l))||{}).valor===tipo).map(l=>l.valor)));
+}
+
+function renderDespesasTipoKpis(){
+  const monthKey = document.getElementById('despesasLancMonthSelect').value;
+  const wrap = document.getElementById('despesasTipoKpiRow');
+  if(!monthKey || !state[monthKey]?.despesasLancamentos?.length){ wrap.innerHTML=''; return; }
+  const [y,m] = monthKey.split('-').map(Number);
+  const prevKey = (m===1) ? (y-1)+'-12' : y+'-'+String(m-1).padStart(2,'0');
+  const temPrev = !!state[prevKey]?.despesasLancamentos?.length;
+
+  const cards = ['fixo','parcela','pontual'].map(tipo=>{
+    const cur = somaDespesasPorTipo(monthKey, tipo);
+    const prev = temPrev ? somaDespesasPorTipo(prevKey, tipo) : null;
+    const varPct = (prev!=null && prev!==0) ? ((cur/prev-1)*100) : null;
+    const deltaHtml = prev==null ? '' :
+      '<div class="delta '+((varPct!=null && varPct<=0)?'up-good':'up-bad')+'" style="margin-top:6px;">'+
+      (varPct==null?'—':((varPct>=0?'▲ ':'▼ ')+pctAbs(varPct)))+' vs '+monthLabel(prevKey)+'</div>';
+    return '<div class="kpi orange"><div class="label">'+DESPESA_TIPO_LABEL[tipo]+' — '+monthLabel(monthKey)+'</div>'+
+      '<div class="value">'+brl(cur)+'</div>'+deltaHtml+'</div>';
+  });
+  wrap.innerHTML = cards.join('');
+}
+
 const despesasColumns = [
   { key:'departamento', label:'Departamento', left:true },
   { key:'categoria', label:'Categoria', left:true },
@@ -703,7 +782,19 @@ const despesasColumns = [
   { key:'empresa', label:'Empresa', left:true, format:r=>escapeHtml(r.empresa) },
   { key:'valor', label:'Valor', format:r=>brl(r.valor), cellClass:()=>'orange-txt' },
   { key:'nomeUsuario', label:'Usuário', left:true, format:r=>escapeHtml(r.nomeUsuario) },
-  { key:'data', label:'Data', sortValue:r=>toSortableDate(r.data) }
+  { key:'data', label:'Data', sortValue:r=>toSortableDate(r.data) },
+  { key:'classificacao', label:'Classificação', align:'center', sortValue:r=>(despesaClassResolved.get(despesaKey(r))||{}).valor||'',
+    format:r=>{
+      const info = despesaClassResolved.get(despesaKey(r)) || {};
+      const val = info.valor || '';
+      const sugerido = info.origem === 'sugerido';
+      let html = '<select class="despesaClassSelect" data-key="'+escapeHtml(despesaKey(r))+'" style="padding:5px 8px;border-radius:6px;font-size:12.5px;'+
+        (sugerido ? 'border:1px solid var(--orange);background:#FFF5EB;' : 'border:1px solid #ccc;')+'">';
+      html += '<option value=""'+(val===''?' selected':'')+'>—</option>';
+      DESPESA_TIPOS.forEach(t=>{ html += '<option value="'+t+'"'+(val===t?' selected':'')+'>'+DESPESA_TIPO_LABEL[t]+'</option>'; });
+      html += '</select>';
+      return html;
+    } }
 ];
 let despesasSortState = { key:'data', dir:'asc', onChange: ()=>renderDespesasLancamentos() };
 
@@ -713,8 +804,21 @@ function renderDespesasLancamentos(){
   const wrap = document.getElementById('despesasLancWrap');
   if(!data || !data.despesasLancamentos || !data.despesasLancamentos.length){ wrap.innerHTML = '<p class="muted">Nenhum lançamento de despesa para o mês selecionado.</p>'; return; }
   const footer = '<tr class="total"><td colspan="5">TOTAL — '+data.despesasLancamentos.length+' lançamentos</td>'+
-    '<td class="orange-txt">'+brl(sum(data.despesasLancamentos.map(l=>l.valor)))+'</td><td colspan="2"></td></tr>';
+    '<td class="orange-txt">'+brl(sum(data.despesasLancamentos.map(l=>l.valor)))+'</td><td colspan="3"></td></tr>';
   renderSortableTable('despesasLancWrap', despesasColumns, data.despesasLancamentos, despesasSortState, footer);
+
+  wrap.querySelectorAll('.despesaClassSelect').forEach(sel=>{
+    sel.addEventListener('change', async e=>{
+      const k = e.target.getAttribute('data-key');
+      const val = e.target.value;
+      if(val==='') delete despesasClassificacao[k]; else despesasClassificacao[k] = val;
+      try{ await saveDespesasClassificacao(); setSyncStatus('ok','✓ Classificação salva'); }
+      catch(err){ setSyncStatus('err','⚠ Não consegui salvar: '+err.message); }
+      refreshDespesaClassResolved();
+      renderDespesasTipoKpis();
+      renderDespesasLancamentos();
+    });
+  });
 }
 
 /* ===================== PÁGINA 4 — Dízimo/Oferta ===================== */
@@ -965,6 +1069,8 @@ function renderAll(){
     ['visão por departamento', renderDeptView],
     ['seletor de despesas', renderDespesasLancMonthSelect],
     ['KPIs de despesas', renderDespesasKpis],
+    ['classificação de despesas', refreshDespesaClassResolved],
+    ['despesas por tipo (KPIs)', renderDespesasTipoKpis],
     ['lançamentos de despesas', renderDespesasLancamentos],
     ['seletor de doadores', renderDoadoresMonthSelect],
     ['doadores (cards)', renderDoadoresRow],
