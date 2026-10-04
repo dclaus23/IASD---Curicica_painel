@@ -193,6 +193,7 @@ function parseFidelidadeFile(filePath) {
     const m = String(dataStr).match(/^(\d{2})\/(\d{2})\/(\d{4})/); // DD/MM/AAAA
     if (!m) continue;
     const monthKey = `${m[3]}-${m[2]}`;
+    const isoDate = `${m[3]}-${m[2]}-${m[1]}`; // AAAA-MM-DD, ordenável como texto
     const pessoa = row[idx["Código Pessoa"]];
     const nomeCompleto = row[idx["Nome Completo"]];
     const codigo = String(row[idx["Código de Categoria"]]);
@@ -204,8 +205,11 @@ function parseFidelidadeFile(filePath) {
     if (categoria === "Dízimo") {
       m2.dizimistas.add(pessoa);
       m2.totalDizimo += valor;
-      if (!m2.dizimistasInfo.has(pessoa)) m2.dizimistasInfo.set(pessoa, { codigo: pessoa, nome: nomeCompleto, valor: 0 });
-      m2.dizimistasInfo.get(pessoa).valor += valor;
+      if (!m2.dizimistasInfo.has(pessoa)) m2.dizimistasInfo.set(pessoa, { codigo: pessoa, nome: nomeCompleto, valor: 0, primeiraData: isoDate, ultimaData: isoDate });
+      const info = m2.dizimistasInfo.get(pessoa);
+      info.valor += valor;
+      if (isoDate < info.primeiraData) info.primeiraData = isoDate;
+      if (isoDate > info.ultimaData) info.ultimaData = isoDate;
     } else { m2.ofertantes.add(pessoa); m2.totalOferta += valor; }
     if (!m2.categorias[codigo]) m2.categorias[codigo] = { codigo, nome: categoria, valor: 0 };
     m2.categorias[codigo].valor += valor;

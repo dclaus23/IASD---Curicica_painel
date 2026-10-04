@@ -813,31 +813,45 @@ function getWindowMonths(n){
   return months.reverse();
 }
 
-const FIDELIDADE_WINDOW_SIZE = 8;
+// Do início do ano civil corrente até o mês atual (incluso, mesmo não fechado).
+// Reinicia sozinho a cada janeiro.
+function getYearToDateMonths(){
+  const d = new Date();
+  const year = d.getFullYear();
+  const currentMonth = d.getMonth()+1; // 1-12
+  const months = [];
+  for(let m=1; m<=currentMonth; m++) months.push(year+'-'+String(m).padStart(2,'0'));
+  return months;
+}
+
 function faixaDizimista(q){
   if(q===0) return {label:'0 vezes', cls:'var-down'};
   if(q<=3) return {label:'1 a 3 vezes', cls:'orange-txt'};
   if(q<=6) return {label:'4 a 6 vezes', cls:'blue-txt'};
-  return {label:'7 a 8 vezes', cls:'green-txt'};
+  return {label:'7 ou mais vezes', cls:'green-txt'};
 }
+function formatDateBR(iso){ if(!iso) return ''; const [y,m,dd]=iso.split('-'); return dd+'/'+m+'/'+y; }
 
 // Monta a lista: todo mundo que já apareceu como dizimista (Fidelidade, categoria
-// "Dízimo") em QUALQUER mês do histórico entra no roster — assim quem parou de
-// dizimar também aparece, com 0 nos últimos 8 meses. "Último Dízimo" olha o
-// histórico inteiro (não só a janela), pra mostrar há quanto tempo a pessoa não
-// dizima mesmo quando isso é antes dos últimos 8 meses.
+// "Dízimo") em QUALQUER mês do histórico entra no roster — assim quem deixou de
+// dizimar neste ano também aparece, com 0. Quantidade, total e as datas de
+// primeiro/último dízimo são calculados só dentro do ano corrente (jan até o mês
+// atual) — o período reinicia sozinho a cada ano novo.
 function computeDizimistasFidelidade(){
-  const windowMonths = getWindowMonths(FIDELIDADE_WINDOW_SIZE);
+  const windowMonths = getYearToDateMonths();
   const windowSet = new Set(windowMonths);
 
-  const info = new Map(); // nomeNormalizado -> {nome, quantidade, totalDizimo, ultimoMes}
+  const info = new Map(); // nomeNormalizado -> {nome, quantidade, totalDizimo, primeiroDizimo, ultimoDizimo}
   getSortedMonthKeys().forEach(mk=>{
     (state[mk].doadores?.dizimistasList||[]).forEach(d=>{
       const key = normalizeName(d.nome);
-      if(!info.has(key)) info.set(key, { nome: cleanName(d.nome), quantidade:0, totalDizimo:0, ultimoMes:null });
+      if(!info.has(key)) info.set(key, { nome: cleanName(d.nome), quantidade:0, totalDizimo:0, primeiroDizimo:null, ultimoDizimo:null });
+      if(!windowSet.has(mk)) return; // fora do ano corrente — não conta nem entra nas datas
       const p = info.get(key);
-      if(!p.ultimoMes || mk > p.ultimoMes) p.ultimoMes = mk;
-      if(windowSet.has(mk)){ p.quantidade += 1; p.totalDizimo += d.valor; }
+      p.quantidade += 1;
+      p.totalDizimo += d.valor;
+      if(d.primeiraData && (!p.primeiroDizimo || d.primeiraData < p.primeiroDizimo)) p.primeiroDizimo = d.primeiraData;
+      if(d.ultimaData && (!p.ultimoDizimo || d.ultimaData > p.ultimoDizimo)) p.ultimoDizimo = d.ultimaData;
     });
   });
 
@@ -851,7 +865,11 @@ const fidelidadeColumns = [
   { key:'faixa', label:'Faixa', align:'center', sortValue:r=>r.quantidade, format:r=>faixaDizimista(r.quantidade).label,
     cellClass:r=>faixaDizimista(r.quantidade).cls },
   { key:'totalDizimo', label:'Total Dízimo (no período)', format:r=>brl(r.totalDizimo) },
-  { key:'ultimoMes', label:'Último Dízimo', align:'center', sortValue:r=>r.ultimoMes||'', format:r=>r.ultimoMes?monthLabel(r.ultimoMes):'—' },
+  { key:'periodoDizimo', label:'Primeiro – Último Dízimo', align:'center', sortValue:r=>r.ultimoDizimo||'',
+    format:r=>{
+      if(!r.primeiroDizimo) return '—';
+      return r.primeiroDizimo===r.ultimoDizimo ? formatDateBR(r.primeiroDizimo) : formatDateBR(r.primeiroDizimo)+' – '+formatDateBR(r.ultimoDizimo);
+    } },
 ];
 let fidelidadeSortState = { key:'quantidade', dir:'asc', onChange: ()=>renderDizimistasFidelidade() };
 let fidelidadeAllRows = [];
@@ -876,7 +894,7 @@ function renderDizimistasFidelidade(){
 
   const sub = document.getElementById('fidelidadeSubtitulo');
   sub.textContent = 'Período: '+monthLabel(windowMonths[0])+' a '+monthLabel(windowMonths[windowMonths.length-1])+
-    ' · baseado só no extrato de Fidelidade (categoria Dízimo).';
+    ' (ano corrente) · baseado só no extrato de Fidelidade (categoria Dízimo).';
 
   const buckets = {z:0, a:0, b:0, c:0};
   rows.forEach(r=>{
@@ -889,14 +907,18 @@ function renderDizimistasFidelidade(){
     bucketTileHtml('0 vezes', buckets.z, 'red'),
     bucketTileHtml('1 a 3 vezes', buckets.a, 'orange'),
     bucketTileHtml('4 a 6 vezes', buckets.b, 'blue'),
-    bucketTileHtml('7 a 8 vezes (em dia)', buckets.c, 'green'),
+    bucketTileHtml('7 ou mais vezes (em dia)', buckets.c, 'green'),
   ].join('');
 
   const qtdSelect = document.getElementById('fidFiltroQtd');
-  if(qtdSelect.options.length <= 1){
-    for(let i=0;i<=FIDELIDADE_WINDOW_SIZE;i++){
+  const qtdMax = windowMonths.length;
+  if(qtdSelect.options.length - 1 !== qtdMax){
+    const prevValue = qtdSelect.value;
+    while(qtdSelect.options.length > 1) qtdSelect.remove(1);
+    for(let i=0;i<=qtdMax;i++){
       const opt = document.createElement('option'); opt.value = i; opt.textContent = i+'x'; qtdSelect.appendChild(opt);
     }
+    if(prevValue!=='' && Number(prevValue)<=qtdMax) qtdSelect.value = prevValue;
   }
 
   const filtered = applyFidelidadeFilters(rows);
@@ -916,11 +938,11 @@ function exportDizimistasFidelidadeCSV(){
     if(va>vb) return fidelidadeSortState.dir==='asc'?1:-1;
     return 0;
   });
-  const header = ['Nome da Pessoa','Quantidade de Vezes Dizimadas','Faixa','Total Dizimo','Último Dízimo'];
+  const header = ['Nome da Pessoa','Quantidade de Vezes Dizimadas','Faixa','Total Dizimo','Primeiro Dízimo','Último Dízimo'];
   const csvEscape = v => '"'+String(v).replace(/"/g,'""')+'"';
   const lines = [header.map(csvEscape).join(';')];
   rows.forEach(r=>{
-    lines.push([r.nome, r.quantidade, faixaDizimista(r.quantidade).label, r.totalDizimo.toFixed(2).replace('.',','), r.ultimoMes?monthLabel(r.ultimoMes):''].map(csvEscape).join(';'));
+    lines.push([r.nome, r.quantidade, faixaDizimista(r.quantidade).label, r.totalDizimo.toFixed(2).replace('.',','), formatDateBR(r.primeiroDizimo), formatDateBR(r.ultimoDizimo)].map(csvEscape).join(';'));
   });
   const csv = '﻿' + lines.join('\r\n'); // BOM pro Excel reconhecer acentuação
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
