@@ -100,6 +100,10 @@
   button{background:var(--blue);color:#fff;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;}
   footer{text-align:center;color:var(--lightgray);font-size:12px;padding:24px;}
   .table-scroll{overflow-x:auto;}
+
+  .rank-toggle{display:flex;gap:4px;}
+  .rank-btn{background:#fff;color:var(--blue);border:1px solid var(--blue);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12.5px;font-weight:600;}
+  .rank-btn.active{background:var(--blue);color:#fff;}
 </style>
 </head>
 <body>
@@ -180,6 +184,38 @@
       </div>
       <p class="muted" style="margin-top:10px;">Clique no cabeçalho de qualquer coluna para ordenar.</p>
       <div class="table-scroll" id="tableDeptWrap"></div>
+    </section>
+
+    <section>
+      <h2 style="border:none;margin:0;padding:0;">Saldo Final — Evolução Mensal</h2>
+      <p class="muted" style="margin-top:4px;">Soma do Saldo Final de todos os departamentos, mês a mês — uma visão geral da saúde financeira da igreja. Mostra só os meses já carregados na base.</p>
+      <div class="chart-wrap" style="margin-top:14px;"><canvas id="chartDeptSaldoEvolucao" height="90"></canvas></div>
+    </section>
+
+    <section>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <h2 style="border:none;margin:0;padding:0;">Top Departamentos — Oferta Direta</h2>
+        <div class="rank-toggle" id="rankOfertaToggle">
+          <button type="button" data-n="5" class="rank-btn active">Top 5</button>
+          <button type="button" data-n="10" class="rank-btn">Top 10</button>
+          <button type="button" data-n="15" class="rank-btn">Top 15</button>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:4px;">Departamentos que mais receberam Oferta Direta no mês selecionado acima (seletor "Mês" no topo da página).</p>
+      <div class="chart-wrap" style="margin-top:14px;"><canvas id="chartRankOferta" height="110"></canvas></div>
+    </section>
+
+    <section>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <h2 style="border:none;margin:0;padding:0;">Top Departamentos — Despesas</h2>
+        <div class="rank-toggle" id="rankDespesasToggle">
+          <button type="button" data-n="5" class="rank-btn active">Top 5</button>
+          <button type="button" data-n="10" class="rank-btn">Top 10</button>
+          <button type="button" data-n="15" class="rank-btn">Top 15</button>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:4px;">Departamentos que mais tiveram Despesas no mês selecionado acima (seletor "Mês" no topo da página).</p>
+      <div class="chart-wrap" style="margin-top:14px;"><canvas id="chartRankDespesas" height="110"></canvas></div>
     </section>
 
   </div>
@@ -691,6 +727,45 @@ function renderDeptView(){
   renderSortableTable('tableDeptWrap', deptColumns, rows, deptSortState, footer);
 }
 
+function renderDeptSaldoEvolucaoChart(){
+  const months = getSortedMonthKeys().filter(mk=>state[mk]?.departments?.length);
+  const saldos = months.map(mk=>round2(sum(state[mk].departments.map(d=>d.saldoFinal))));
+  destroyChart('deptSaldoEvolucao','chartDeptSaldoEvolucao');
+  charts.deptSaldoEvolucao = new Chart(document.getElementById('chartDeptSaldoEvolucao'), {
+    type:'bar',
+    data:{ labels: months.map(monthLabel), datasets:[
+      { label:'Saldo Final', data:saldos, backgroundColor: saldos.map(v=>v<0?COLORS.red:COLORS.blue),
+        datalabels:{anchor:'end', align:'top', color:COLORS.navy, font:{size:10,weight:'bold'}, formatter:v=>num(v,0)} }
+    ]},
+    options:{ responsive:true, plugins:{ legend:{display:false} }, scales:{ y:{ grace:'15%' } } }
+  });
+}
+
+// Ranking Top N de departamentos por um campo (Oferta Direta ou Despesas), do mês
+// selecionado no seletor "Mês" da própria página de Departamentos.
+let rankOfertaN = 5;
+let rankDespesasN = 5;
+
+function renderRankChart(canvasId, chartKey, field, n, color, label){
+  const monthKey = document.getElementById('deptMonthSelect').value;
+  const depts = state[monthKey]?.departments || [];
+  // Despesas vem negativo na base (saída de caixa); ranqueamos e exibimos pelo valor absoluto,
+  // assim o departamento que mais gastou aparece primeiro e a barra cresce normalmente.
+  const sorted = [...depts].filter(d=>d[field]).sort((a,b)=>Math.abs(b[field])-Math.abs(a[field])).slice(0,n);
+  destroyChart(chartKey, canvasId);
+  if(!sorted.length){ const el=document.getElementById(canvasId); const ctx=el.getContext('2d'); ctx.clearRect(0,0,el.width,el.height); return; }
+  charts[chartKey] = new Chart(document.getElementById(canvasId), {
+    type:'bar',
+    data:{ labels: sorted.map(d=>d.nome), datasets:[
+      { label, data: sorted.map(d=>Math.abs(d[field])), backgroundColor: color,
+        datalabels:{anchor:'end', align:'end', color, font:{size:10,weight:'bold'}, formatter:v=>num(v,0)} }
+    ]},
+    options:{ indexAxis:'y', responsive:true, plugins:{ legend:{display:false} }, scales:{ x:{ grace:'20%' } } }
+  });
+}
+function renderRankOfertaChart(){ renderRankChart('chartRankOferta','rankOferta','ofertaDireta', rankOfertaN, COLORS.blue, 'Oferta Direta'); }
+function renderRankDespesasChart(){ renderRankChart('chartRankDespesas','rankDespesas','despesas', rankDespesasN, COLORS.orange, 'Despesas'); }
+
 /* ===================== PÁGINA 3 — Despesas ===================== */
 function renderDespesasLancMonthSelect(){ fillMonthSelect('despesasLancMonthSelect', k=>state[k].despesasLancamentos && state[k].despesasLancamentos.length); }
 
@@ -1067,6 +1142,9 @@ function renderAll(){
     ['tabela mensal completa', renderFullTable],
     ['seletor de departamento', renderDeptMonthSelect],
     ['visão por departamento', renderDeptView],
+    ['saldo final - evolução mensal', renderDeptSaldoEvolucaoChart],
+    ['rank departamentos - oferta direta', renderRankOfertaChart],
+    ['rank departamentos - despesas', renderRankDespesasChart],
     ['seletor de despesas', renderDespesasLancMonthSelect],
     ['KPIs de despesas', renderDespesasKpis],
     ['classificação de despesas', refreshDespesaClassResolved],
@@ -1115,6 +1193,23 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById(btn.getAttribute('data-tab')).classList.add('active');
+  });
+});
+
+document.querySelectorAll('#rankOfertaToggle .rank-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#rankOfertaToggle .rank-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    rankOfertaN = Number(btn.getAttribute('data-n'));
+    renderRankOfertaChart();
+  });
+});
+document.querySelectorAll('#rankDespesasToggle .rank-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#rankDespesasToggle .rank-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    rankDespesasN = Number(btn.getAttribute('data-n'));
+    renderRankDespesasChart();
   });
 });
 
