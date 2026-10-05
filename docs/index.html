@@ -269,20 +269,27 @@
 
     <section>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-        <h2 style="border:none;margin:0;padding:0;">Fidelidade dos Dizimistas — últimos 8 meses</h2>
+        <h2 style="border:none;margin:0;padding:0;">Fidelidade dos Dizimistas — ano corrente</h2>
         <button id="btnExportFidelidade" style="padding:8px 14px;border:1px solid var(--blue);border-radius:6px;background:#fff;color:var(--blue);cursor:pointer;font-weight:600;">⬇ Exportar para Excel</button>
       </div>
       <p class="muted" id="fidelidadeSubtitulo" style="margin-top:4px;"></p>
       <div class="kpis" id="fidelidadeOverview" style="margin-top:14px;"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px;">
         <input type="text" id="fidFiltroNome" placeholder="Filtrar por nome..." style="padding:8px 12px;border-radius:6px;border:1px solid #ccc;font-size:14px;flex:1;min-width:200px;">
+        <input type="text" id="fidFiltroCargo" placeholder="Filtrar por cargo..." style="padding:8px 12px;border-radius:6px;border:1px solid #ccc;font-size:14px;min-width:160px;">
+        <div style="display:flex;align-items:center;gap:4px;">
+          <label class="muted" style="font-size:13px;">Idade:</label>
+          <input type="number" id="fidFiltroIdadeMin" placeholder="mín." min="0" style="padding:8px 8px;border-radius:6px;border:1px solid #ccc;font-size:14px;width:68px;">
+          <span class="muted">–</span>
+          <input type="number" id="fidFiltroIdadeMax" placeholder="máx." min="0" style="padding:8px 8px;border-radius:6px;border:1px solid #ccc;font-size:14px;width:68px;">
+        </div>
         <select id="fidFiltroQtd"><option value="">Qtde.: todas</option></select>
         <select id="fidFiltroFaixa">
           <option value="">Faixa: todas</option>
           <option value="0 vezes">0 vezes</option>
           <option value="1 a 3 vezes">1 a 3 vezes</option>
           <option value="4 a 6 vezes">4 a 6 vezes</option>
-          <option value="7 a 8 vezes">7 a 8 vezes</option>
+          <option value="7 ou mais vezes">7 ou mais vezes</option>
         </select>
       </div>
       <div class="table-scroll" id="tableFidelidadeWrap" style="margin-top:16px;"></div>
@@ -347,6 +354,7 @@ let categoryPercentages = {};
 let categoryPercentagesFidelidade = {};
 let despesasClassificacao = {};
 let despesaClassResolved = new Map();
+let fidelidadePessoas = {};
 let charts = {};
 
 /* ===================== Autenticação (Supabase Auth, via REST simples) ===================== */
@@ -426,13 +434,14 @@ async function loadFromSupabase(){
   rows.forEach(r => { newState[r.month_key] = r.data; });
   state = newState;
 
-  const settingsRows = await sbFetch('app_settings?select=category_registry,category_filters,category_percentages,category_percentages_fidelidade,despesas_classificacao&id=eq.1');
+  const settingsRows = await sbFetch('app_settings?select=category_registry,category_filters,category_percentages,category_percentages_fidelidade,despesas_classificacao,fidelidade_pessoas&id=eq.1');
   if(settingsRows && settingsRows[0]){
     categoryRegistry = settingsRows[0].category_registry || {};
     categoryFilters = settingsRows[0].category_filters || {};
     categoryPercentages = settingsRows[0].category_percentages || {};
     categoryPercentagesFidelidade = settingsRows[0].category_percentages_fidelidade || {};
     despesasClassificacao = settingsRows[0].despesas_classificacao || {};
+    fidelidadePessoas = settingsRows[0].fidelidade_pessoas || {};
   }
 }
 
@@ -1020,7 +1029,7 @@ function computeDizimistasFidelidade(){
   const windowMonths = getYearToDateMonths();
   const windowSet = new Set(windowMonths);
 
-  const info = new Map(); // nomeNormalizado -> {nome, quantidade, totalDizimo, primeiroDizimo, ultimoDizimo}
+  const info = new Map(); // nomeNormalizado -> {nome, quantidade, totalDizimo, primeiroDizimo, ultimoDizimo, cargo, idade}
   getSortedMonthKeys().forEach(mk=>{
     (state[mk].doadores?.dizimistasList||[]).forEach(d=>{
       const key = normalizeName(d.nome);
@@ -1034,11 +1043,20 @@ function computeDizimistasFidelidade(){
     });
   });
 
-  return { windowMonths, rows: Array.from(info.values()) };
+  // Cruza com o extrato "Fidelidade da Igreja" (cargo/profissão e idade), usando o
+  // nome normalizado como chave — a única coisa em comum entre as duas bases.
+  const rows = Array.from(info.values()).map(p=>{
+    const pessoa = fidelidadePessoas[normalizeName(p.nome)];
+    return { ...p, cargo: pessoa?.cargo || '', idade: (pessoa && pessoa.idade!=null) ? pessoa.idade : null };
+  });
+
+  return { windowMonths, rows };
 }
 
 const fidelidadeColumns = [
   { key:'nome', label:'Nome da Pessoa', left:true },
+  { key:'cargo', label:'Cargo', left:true, format:r=>r.cargo || '—' },
+  { key:'idade', label:'Idade', align:'center', sortValue:r=>r.idade==null?-1:r.idade, format:r=>r.idade==null?'—':num(r.idade,0) },
   { key:'quantidade', label:'Qtde. de Vezes Dizimadas', align:'center', format:r=>num(r.quantidade,0),
     cellClass:r=>faixaDizimista(r.quantidade).cls },
   { key:'faixa', label:'Faixa', align:'center', sortValue:r=>r.quantidade, format:r=>faixaDizimista(r.quantidade).label,
@@ -1052,7 +1070,7 @@ const fidelidadeColumns = [
 ];
 let fidelidadeSortState = { key:'quantidade', dir:'asc', onChange: ()=>renderDizimistasFidelidade() };
 let fidelidadeAllRows = [];
-let fidelidadeFilters = { nome:'', quantidade:'', faixa:'' };
+let fidelidadeFilters = { nome:'', cargo:'', idadeMin:'', idadeMax:'', quantidade:'', faixa:'' };
 
 function bucketTileHtml(label, count, colorClass){
   return '<div class="kpi '+colorClass+'"><div class="label">'+label+'</div><div class="value">'+num(count,0)+'</div></div>';
@@ -1061,6 +1079,9 @@ function bucketTileHtml(label, count, colorClass){
 function applyFidelidadeFilters(rows){
   return rows.filter(r=>{
     if(fidelidadeFilters.nome && !normalizeName(r.nome).includes(normalizeName(fidelidadeFilters.nome))) return false;
+    if(fidelidadeFilters.cargo && !normalizeName(r.cargo).includes(normalizeName(fidelidadeFilters.cargo))) return false;
+    if(fidelidadeFilters.idadeMin!=='' && (r.idade==null || r.idade < Number(fidelidadeFilters.idadeMin))) return false;
+    if(fidelidadeFilters.idadeMax!=='' && (r.idade==null || r.idade > Number(fidelidadeFilters.idadeMax))) return false;
     if(fidelidadeFilters.quantidade!=='' && r.quantidade !== Number(fidelidadeFilters.quantidade)) return false;
     if(fidelidadeFilters.faixa && faixaDizimista(r.quantidade).label !== fidelidadeFilters.faixa) return false;
     return true;
@@ -1117,11 +1138,11 @@ function exportDizimistasFidelidadeCSV(){
     if(va>vb) return fidelidadeSortState.dir==='asc'?1:-1;
     return 0;
   });
-  const header = ['Nome da Pessoa','Quantidade de Vezes Dizimadas','Faixa','Total Dizimo','Primeiro Dízimo','Último Dízimo'];
+  const header = ['Nome da Pessoa','Cargo','Idade','Quantidade de Vezes Dizimadas','Faixa','Total Dizimo','Primeiro Dízimo','Último Dízimo'];
   const csvEscape = v => '"'+String(v).replace(/"/g,'""')+'"';
   const lines = [header.map(csvEscape).join(';')];
   rows.forEach(r=>{
-    lines.push([r.nome, r.quantidade, faixaDizimista(r.quantidade).label, r.totalDizimo.toFixed(2).replace('.',','), formatDateBR(r.primeiroDizimo), formatDateBR(r.ultimoDizimo)].map(csvEscape).join(';'));
+    lines.push([r.nome, r.cargo||'', r.idade==null?'':r.idade, r.quantidade, faixaDizimista(r.quantidade).label, r.totalDizimo.toFixed(2).replace('.',','), formatDateBR(r.primeiroDizimo), formatDateBR(r.ultimoDizimo)].map(csvEscape).join(';'));
   });
   const csv = '﻿' + lines.join('\r\n'); // BOM pro Excel reconhecer acentuação
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
@@ -1184,6 +1205,9 @@ async function refresh(){
 document.getElementById('btnExportFidelidade').addEventListener('click', exportDizimistasFidelidadeCSV);
 
 document.getElementById('fidFiltroNome').addEventListener('input', e=>{ fidelidadeFilters.nome = e.target.value; renderDizimistasFidelidade(); });
+document.getElementById('fidFiltroCargo').addEventListener('input', e=>{ fidelidadeFilters.cargo = e.target.value; renderDizimistasFidelidade(); });
+document.getElementById('fidFiltroIdadeMin').addEventListener('input', e=>{ fidelidadeFilters.idadeMin = e.target.value; renderDizimistasFidelidade(); });
+document.getElementById('fidFiltroIdadeMax').addEventListener('input', e=>{ fidelidadeFilters.idadeMax = e.target.value; renderDizimistasFidelidade(); });
 document.getElementById('fidFiltroQtd').addEventListener('change', e=>{ fidelidadeFilters.quantidade = e.target.value; renderDizimistasFidelidade(); });
 document.getElementById('fidFiltroFaixa').addEventListener('change', e=>{ fidelidadeFilters.faixa = e.target.value; renderDizimistasFidelidade(); });
 

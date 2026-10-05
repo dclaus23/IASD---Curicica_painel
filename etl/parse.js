@@ -19,6 +19,9 @@ function isFidelidadeSheet(header) {
 function is7MeSheet(header) {
   return header.includes("Nome dizimista e ofertante") && header.includes("PAYMENT TYPE NAME");
 }
+function isFidelidadeIgrejaSheet(header) {
+  return header.includes("MEMBER NAME") && header.includes("OCCUPATION NAME");
+}
 function monthKeyFromFilename(name) {
   const m = name.match(/^(\d{4})-(\d{2})/);
   return m ? `${m[1]}-${m[2]}` : null;
@@ -41,6 +44,7 @@ function detectFileType(filePath) {
   if (isDespesasSheet(header)) return "despesas";
   if (isFidelidadeSheet(header)) return "fidelidade";
   if (is7MeSheet(header)) return "7me";
+  if (isFidelidadeIgrejaSheet(header)) return "fidelidade_igreja";
   return null;
 }
 
@@ -277,8 +281,39 @@ function parse7MeFile(filePath) {
   return result;
 }
 
+// "Fidelidade - Fidelidade da Igreja": um registro por membro da igreja, com
+// profissão (OCCUPATION NAME) e idade. Não é um extrato por mês — é uma foto atual
+// da congregação — então devolvemos um mapa único (não por mês), usando o nome
+// normalizado como chave pra depois juntar com a tabela de Fidelidade dos Dizimistas
+// (as duas bases só têm o nome em comum, sem um código de pessoa compartilhado).
+function parseFidelidadeIgrejaFile(filePath) {
+  const wb = XLSX.readFile(filePath);
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+  const header = rows[0];
+  if (!isFidelidadeIgrejaSheet(header)) return null;
+  const idx = Object.fromEntries(header.map((h, i) => [h, i]));
+
+  const pessoas = {};
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || row.length === 0) continue;
+    const nome = row[idx["MEMBER NAME"]];
+    if (!nome) continue;
+    const cargo = row[idx["OCCUPATION NAME"]];
+    const idadeRaw = row[idx["Idade"]];
+    const idade = idadeRaw === null || idadeRaw === undefined || idadeRaw === "" ? null : Number(idadeRaw);
+    pessoas[normalizeName(nome)] = {
+      nome,
+      cargo: cargo || "",
+      idade: Number.isFinite(idade) ? idade : null,
+    };
+  }
+  return pessoas;
+}
+
 module.exports = {
-  round2, isDepartmentSheet, isTreasurySheet, isDespesasSheet, isFidelidadeSheet, is7MeSheet, monthKeyFromFilename,
-  normalizeName, detectFileType, parseDepartmentFile, parseTreasuryFile, parseDespesasFile, parseFidelidadeFile,
-  parse7MeFile, suggestClassification,
+  round2, isDepartmentSheet, isTreasurySheet, isDespesasSheet, isFidelidadeSheet, is7MeSheet, isFidelidadeIgrejaSheet,
+  monthKeyFromFilename, normalizeName, detectFileType, parseDepartmentFile, parseTreasuryFile, parseDespesasFile,
+  parseFidelidadeFile, parse7MeFile, parseFidelidadeIgrejaFile, suggestClassification,
 };

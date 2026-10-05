@@ -8,7 +8,8 @@ const path = require("path");
 const chokidar = require("chokidar");
 const { createClient } = require("@supabase/supabase-js");
 const {
-  detectFileType, parseDepartmentFile, parseTreasuryFile, parseDespesasFile, parseFidelidadeFile, parse7MeFile, suggestClassification, round2,
+  detectFileType, parseDepartmentFile, parseTreasuryFile, parseDespesasFile, parseFidelidadeFile, parse7MeFile,
+  parseFidelidadeIgrejaFile, suggestClassification, round2,
 } = require("./parse");
 
 const WATCH_FOLDER = process.env.WATCH_FOLDER;
@@ -166,6 +167,22 @@ async function processFile(filePath) {
         await saveMonthRow(monthKey, existing);
       }
       log(`✓ 7Me processado (pagamentos sem departamento específico, candidatos a Dízimo) — ${Object.keys(byMonth).length} meses atualizados — de "${filename}"`);
+    } else if (type === "fidelidade_igreja") {
+      const pessoas = parseFidelidadeIgrejaFile(filePath);
+      if (!pessoas || Object.keys(pessoas).length === 0) { log(`⚠ Não encontrei pessoas válidas em "${filename}".`); return; }
+
+      // Não é dado por mês — é uma foto da congregação (cargo/profissão e idade).
+      // Mesclamos com o que já tinha, pra não perder quem não aparece num export
+      // mais novo/parcial; quem está no arquivo atual sempre sobrescreve o anterior.
+      const { data, error } = await supabase.from("app_settings").select("fidelidade_pessoas").eq("id", 1).single();
+      if (error) throw error;
+      const atual = data.fidelidade_pessoas || {};
+      const mesclado = { ...atual, ...pessoas };
+      const { error: err2 } = await supabase.from("app_settings")
+        .update({ fidelidade_pessoas: mesclado, updated_at: new Date().toISOString() })
+        .eq("id", 1);
+      if (err2) throw err2;
+      log(`✓ Fidelidade da Igreja atualizada — ${Object.keys(pessoas).length} pessoas (cargo/idade) — de "${filename}"`);
     }
   } catch (err) {
     log(`❌ Erro ao processar "${filename}": ${err.message}`);
