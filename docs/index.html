@@ -1080,7 +1080,7 @@ let fidelidadeShowTotal = true;
 function getFidelidadeColumns(){
   const cols = [
     { key:'nome', label:'Nome da Pessoa', left:true },
-    { key:'detalhe', label:'', align:'center', format:r=>'<button type="button" class="fidDetailBtn" data-key="'+encodeURIComponent(normalizeName(r.nome))+'" title="Ver detalhe mês a mês">+</button>' },
+    { key:'detalhe', label:'', align:'center', format:r=>'<button type="button" class="fidDetailBtn" data-key="'+encodeURIComponent(normalizeName(r.nome))+'" title="Ver detalhe (data e valor)">+</button>' },
     { key:'cargo', label:'Cargo', left:true, format:r=>r.cargo || '—' },
     { key:'idade', label:'Idade', align:'center', sortValue:r=>r.idade==null?-1:r.idade, format:r=>r.idade==null?'—':num(r.idade,0) },
     { key:'quantidade', label:'Qtde. de Vezes Dizimadas', align:'center', format:r=>num(r.quantidade,0),
@@ -1193,36 +1193,45 @@ function exportDizimistasFidelidadeCSV(){
   URL.revokeObjectURL(url);
 }
 
-// Detalhe mês a mês de uma pessoa (botão "+"): mostra, dentro da janela de 12
-// meses em exibição, quanto e quando essa pessoa dizimou em cada mês — ajuda a
-// enxergar o padrão de renda/contribuição dela ao longo do tempo.
+// Detalhe de uma pessoa (botão "+"): lista só o que importa pra análise — data e
+// valor de cada dízimo dela dentro da janela de 12 meses em exibição. Usa o
+// extrato lançamento a lançamento (campo "lancamentos", um item por data); se
+// algum mês ainda não foi reprocessado com esse campo (dado antigo, de antes
+// dessa mudança), cai pra um único registro no fim do intervalo daquele mês,
+// pra não sumir com a informação.
 function showFidDetail(nomeNormalizado, windowMonths){
   const row = fidelidadeAllRows.find(r=>normalizeName(r.nome)===nomeNormalizado);
   const nomeExibicao = row ? row.nome : nomeNormalizado;
 
-  const linhas = windowMonths.map(mk=>{
+  const lancamentos = [];
+  windowMonths.forEach(mk=>{
     const d = (state[mk]?.doadores?.dizimistasList||[]).find(x=>normalizeName(x.nome)===nomeNormalizado);
-    return {
-      mes: mk,
-      valor: d ? d.valor : 0,
-      data: d ? (d.primeiraData===d.ultimaData ? formatDateBR(d.primeiraData) : formatDateBR(d.primeiraData)+' – '+formatDateBR(d.ultimaData)) : '—',
-      deu: !!d,
-    };
+    if(!d) return;
+    if(d.lancamentos && d.lancamentos.length){
+      d.lancamentos.forEach(l=>lancamentos.push(l));
+    } else {
+      lancamentos.push({ data: d.ultimaData || d.primeiraData, valor: d.valor });
+    }
   });
+  lancamentos.sort((a,b)=> a.data<b.data?-1:(a.data>b.data?1:0));
 
   document.getElementById('fidDetailNome').textContent = nomeExibicao;
   document.getElementById('fidDetailSub').textContent = windowMonths.length ?
-    ('Dízimo mês a mês — '+monthLabel(windowMonths[0])+' a '+monthLabel(windowMonths[windowMonths.length-1])+
-      ' · Total no período: '+brl(row ? row.totalDizimo : 0)) : '';
+    ('Período: '+monthLabel(windowMonths[0])+' a '+monthLabel(windowMonths[windowMonths.length-1])+
+      ' · Total: '+brl(row ? row.totalDizimo : 0)) : '';
 
-  let html = '<table><thead><tr><th style="text-align:left;">Mês</th><th style="text-align:right;">Valor</th><th style="text-align:center;">Data</th></tr></thead><tbody>';
-  linhas.forEach((l,i)=>{
-    html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'>'+
-      '<td style="text-align:left;">'+monthLabel(l.mes)+'</td>'+
-      '<td style="text-align:right;'+(l.deu?'':'color:var(--lightgray);')+'">'+(l.deu?brl(l.valor):'—')+'</td>'+
-      '<td style="text-align:center;">'+l.data+'</td></tr>';
-  });
-  html += '</tbody></table>';
+  let html;
+  if(!lancamentos.length){
+    html = '<p class="muted" style="text-align:center;padding:16px 0;">Nenhum dízimo registrado nesse período.</p>';
+  } else {
+    html = '<table><thead><tr><th style="text-align:left;">Data</th><th style="text-align:right;">Valor</th></tr></thead><tbody>';
+    lancamentos.forEach((l,i)=>{
+      html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'>'+
+        '<td style="text-align:left;">'+formatDateBR(l.data)+'</td>'+
+        '<td style="text-align:right;">'+brl(l.valor)+'</td></tr>';
+    });
+    html += '</tbody></table>';
+  }
   document.getElementById('fidDetailTableWrap').innerHTML = html;
 
   document.getElementById('fidDetailOverlay').style.display = 'flex';

@@ -210,9 +210,10 @@ function parseFidelidadeFile(filePath) {
     if (categoria === "Dízimo") {
       m2.dizimistas.add(pessoa);
       m2.totalDizimo += valor;
-      if (!m2.dizimistasInfo.has(pessoa)) m2.dizimistasInfo.set(pessoa, { codigo: pessoa, nome: nomeCompleto, valor: 0, primeiraData: isoDate, ultimaData: isoDate });
+      if (!m2.dizimistasInfo.has(pessoa)) m2.dizimistasInfo.set(pessoa, { codigo: pessoa, nome: nomeCompleto, valor: 0, primeiraData: isoDate, ultimaData: isoDate, lancamentos: [] });
       const info = m2.dizimistasInfo.get(pessoa);
       info.valor += valor;
+      info.lancamentos.push({ data: isoDate, valor: round2(valor) });
       if (isoDate < info.primeiraData) info.primeiraData = isoDate;
       if (isoDate > info.ultimaData) info.ultimaData = isoDate;
     } else { m2.ofertantes.add(pessoa); m2.totalOferta += valor; }
