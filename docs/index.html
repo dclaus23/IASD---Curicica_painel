@@ -104,6 +104,12 @@
   .rank-toggle{display:flex;gap:4px;}
   .rank-btn{background:#fff;color:var(--blue);border:1px solid var(--blue);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12.5px;font-weight:600;}
   .rank-btn.active{background:var(--blue);color:#fff;}
+
+  .fidDetailBtn{width:24px;height:24px;padding:0;border-radius:50%;border:1px solid var(--blue);background:#fff;color:var(--blue);font-weight:700;line-height:1;cursor:pointer;font-size:14px;}
+  .fidDetailBtn:hover{background:var(--blue);color:#fff;}
+  .pill-btn{padding:8px 14px;border:1px solid var(--blue);border-radius:6px;background:#fff;color:var(--blue);cursor:pointer;font-weight:600;font-size:14px;}
+  #fidDetailOverlay{position:fixed;inset:0;background:rgba(14,40,65,0.55);display:none;align-items:center;justify-content:center;z-index:5000;padding:16px;}
+  #fidDetailOverlay .box{background:#fff;border-radius:10px;padding:24px;max-width:640px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.35);}
 </style>
 </head>
 <body>
@@ -269,8 +275,13 @@
 
     <section>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-        <h2 style="border:none;margin:0;padding:0;">Fidelidade dos Dizimistas — ano corrente</h2>
-        <button id="btnExportFidelidade" style="padding:8px 14px;border:1px solid var(--blue);border-radius:6px;background:#fff;color:var(--blue);cursor:pointer;font-weight:600;">⬇ Exportar para Excel</button>
+        <h2 style="border:none;margin:0;padding:0;">Fidelidade dos Dizimistas — últimos 12 meses</h2>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <label class="muted" style="font-size:13px;">Até o mês: </label>
+          <select id="fidAnchorMonthSelect"></select>
+          <button id="btnToggleTotalDizimo" type="button" class="pill-btn">👁 Ocultar Total</button>
+          <button id="btnExportFidelidade" class="pill-btn">⬇ Exportar para Excel</button>
+        </div>
       </div>
       <p class="muted" id="fidelidadeSubtitulo" style="margin-top:4px;"></p>
       <div class="kpis" id="fidelidadeOverview" style="margin-top:14px;"></div>
@@ -295,6 +306,19 @@
       <div class="table-scroll" id="tableFidelidadeWrap" style="margin-top:16px;"></div>
     </section>
 
+  </div>
+
+  <div id="fidDetailOverlay">
+    <div class="box">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+        <div>
+          <h3 id="fidDetailNome" style="margin:0;color:var(--navy);"></h3>
+          <p class="muted" id="fidDetailSub" style="margin:4px 0 0;"></p>
+        </div>
+        <button id="fidDetailClose" type="button" style="background:none;border:none;padding:0;font-size:24px;line-height:1;cursor:pointer;color:var(--navy);">×</button>
+      </div>
+      <div class="table-scroll" id="fidDetailTableWrap" style="margin-top:16px;"></div>
+    </div>
   </div>
 
 </main>
@@ -989,27 +1013,22 @@ function normalizeName(s){
 }
 function cleanName(s){ return String(s||'').replace(/\s+/g,' ').trim(); }
 
-// Os N meses completos mais recentes, terminando no mês anterior ao atual (o mês
-// corrente ainda não fechou). A janela anda sozinha conforme o calendário do dia.
-function getWindowMonths(n){
-  const d = new Date(); d.setDate(1);
+// Janela móvel de N meses terminando no mês escolhido no seletor "Até o mês"
+// (inclusive) — ex.: ancorado em set/2026 com n=12 dá out/2025 a set/2026.
+function getRollingMonths(anchorMonthKey, n){
+  const [y,m] = anchorMonthKey.split('-').map(Number);
   const months = [];
-  for(let i=1;i<=n;i++){
-    const dt = new Date(d.getFullYear(), d.getMonth()-i, 1);
+  for(let i=n-1;i>=0;i--){
+    const dt = new Date(y, (m-1)-i, 1);
     months.push(dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0'));
   }
-  return months.reverse();
-}
-
-// Do início do ano civil corrente até o mês atual (incluso, mesmo não fechado).
-// Reinicia sozinho a cada janeiro.
-function getYearToDateMonths(){
-  const d = new Date();
-  const year = d.getFullYear();
-  const currentMonth = d.getMonth()+1; // 1-12
-  const months = [];
-  for(let m=1; m<=currentMonth; m++) months.push(year+'-'+String(m).padStart(2,'0'));
   return months;
+}
+// Seletor do mês-âncora: por padrão, o mês mais recente com dados de Fidelidade
+// (equivale a "últimos 12 meses" terminando hoje), mas o tesoureiro pode escolher
+// qualquer mês pra ver a janela de 12 meses terminando nele.
+function renderFidAnchorMonthSelect(){
+  fillMonthSelect('fidAnchorMonthSelect', k=>(state[k].doadores?.dizimistasList||[]).length>0);
 }
 
 function faixaDizimista(q){
@@ -1022,11 +1041,13 @@ function formatDateBR(iso){ if(!iso) return ''; const [y,m,dd]=iso.split('-'); r
 
 // Monta a lista: todo mundo que já apareceu como dizimista (Fidelidade, categoria
 // "Dízimo") em QUALQUER mês do histórico entra no roster — assim quem deixou de
-// dizimar neste ano também aparece, com 0. Quantidade, total e as datas de
-// primeiro/último dízimo são calculados só dentro do ano corrente (jan até o mês
-// atual) — o período reinicia sozinho a cada ano novo.
+// dizimar na janela também aparece, com 0. Quantidade, total e as datas de
+// primeiro/último dízimo são calculados só dentro da janela móvel de 12 meses
+// terminando no mês escolhido em "Até o mês".
 function computeDizimistasFidelidade(){
-  const windowMonths = getYearToDateMonths();
+  const anchorSel = document.getElementById('fidAnchorMonthSelect');
+  const anchor = (anchorSel && anchorSel.value) || getSortedMonthKeys().filter(k=>(state[k].doadores?.dizimistasList||[]).length>0).pop();
+  const windowMonths = anchor ? getRollingMonths(anchor, 12) : [];
   const windowSet = new Set(windowMonths);
 
   const info = new Map(); // nomeNormalizado -> {nome, quantidade, totalDizimo, primeiroDizimo, ultimoDizimo, cargo, idade}
@@ -1034,7 +1055,7 @@ function computeDizimistasFidelidade(){
     (state[mk].doadores?.dizimistasList||[]).forEach(d=>{
       const key = normalizeName(d.nome);
       if(!info.has(key)) info.set(key, { nome: cleanName(d.nome), quantidade:0, totalDizimo:0, primeiroDizimo:null, ultimoDizimo:null });
-      if(!windowSet.has(mk)) return; // fora do ano corrente — não conta nem entra nas datas
+      if(!windowSet.has(mk)) return; // fora da janela de 12 meses — não conta nem entra nas datas
       const p = info.get(key);
       p.quantidade += 1;
       p.totalDizimo += d.valor;
@@ -1053,21 +1074,30 @@ function computeDizimistasFidelidade(){
   return { windowMonths, rows };
 }
 
-const fidelidadeColumns = [
-  { key:'nome', label:'Nome da Pessoa', left:true },
-  { key:'cargo', label:'Cargo', left:true, format:r=>r.cargo || '—' },
-  { key:'idade', label:'Idade', align:'center', sortValue:r=>r.idade==null?-1:r.idade, format:r=>r.idade==null?'—':num(r.idade,0) },
-  { key:'quantidade', label:'Qtde. de Vezes Dizimadas', align:'center', format:r=>num(r.quantidade,0),
-    cellClass:r=>faixaDizimista(r.quantidade).cls },
-  { key:'faixa', label:'Faixa', align:'center', sortValue:r=>r.quantidade, format:r=>faixaDizimista(r.quantidade).label,
-    cellClass:r=>faixaDizimista(r.quantidade).cls },
-  { key:'totalDizimo', label:'Total Dízimo (no período)', format:r=>brl(r.totalDizimo) },
-  { key:'periodoDizimo', label:'Primeiro – Último Dízimo', align:'center', sortValue:r=>r.ultimoDizimo||'',
+// "Total Dízimo" tem um olho pra poder esconder na hora de apresentar (valor
+// individual de quem dizima é dado sensível) sem precisar tirar a tabela do ar.
+let fidelidadeShowTotal = true;
+function getFidelidadeColumns(){
+  const cols = [
+    { key:'nome', label:'Nome da Pessoa', left:true },
+    { key:'detalhe', label:'', align:'center', format:r=>'<button type="button" class="fidDetailBtn" data-key="'+encodeURIComponent(normalizeName(r.nome))+'" title="Ver detalhe mês a mês">+</button>' },
+    { key:'cargo', label:'Cargo', left:true, format:r=>r.cargo || '—' },
+    { key:'idade', label:'Idade', align:'center', sortValue:r=>r.idade==null?-1:r.idade, format:r=>r.idade==null?'—':num(r.idade,0) },
+    { key:'quantidade', label:'Qtde. de Vezes Dizimadas', align:'center', format:r=>num(r.quantidade,0),
+      cellClass:r=>faixaDizimista(r.quantidade).cls },
+    { key:'faixa', label:'Faixa', align:'center', sortValue:r=>r.quantidade, format:r=>faixaDizimista(r.quantidade).label,
+      cellClass:r=>faixaDizimista(r.quantidade).cls },
+  ];
+  if(fidelidadeShowTotal){
+    cols.push({ key:'totalDizimo', label:'Total Dízimo (no período)', format:r=>brl(r.totalDizimo) });
+  }
+  cols.push({ key:'periodoDizimo', label:'Primeiro – Último Dízimo', align:'center', sortValue:r=>r.ultimoDizimo||'',
     format:r=>{
       if(!r.primeiroDizimo) return '—';
       return r.primeiroDizimo===r.ultimoDizimo ? formatDateBR(r.primeiroDizimo) : formatDateBR(r.primeiroDizimo)+' – '+formatDateBR(r.ultimoDizimo);
-    } },
-];
+    } });
+  return cols;
+}
 let fidelidadeSortState = { key:'quantidade', dir:'asc', onChange: ()=>renderDizimistasFidelidade() };
 let fidelidadeAllRows = [];
 let fidelidadeFilters = { nome:'', cargo:'', idadeMin:'', idadeMax:'', quantidade:'', faixa:'' };
@@ -1093,8 +1123,10 @@ function renderDizimistasFidelidade(){
   fidelidadeAllRows = rows;
 
   const sub = document.getElementById('fidelidadeSubtitulo');
-  sub.textContent = 'Período: '+monthLabel(windowMonths[0])+' a '+monthLabel(windowMonths[windowMonths.length-1])+
-    ' (ano corrente) · baseado só no extrato de Fidelidade (categoria Dízimo).';
+  sub.textContent = windowMonths.length ?
+    ('Período: '+monthLabel(windowMonths[0])+' a '+monthLabel(windowMonths[windowMonths.length-1])+
+      ' (12 meses) · baseado só no extrato de Fidelidade (categoria Dízimo).') :
+    'Sem dados de Fidelidade carregados ainda.';
 
   const buckets = {z:0, a:0, b:0, c:0};
   rows.forEach(r=>{
@@ -1121,16 +1153,24 @@ function renderDizimistasFidelidade(){
     if(prevValue!=='' && Number(prevValue)<=qtdMax) qtdSelect.value = prevValue;
   }
 
+  const fidelidadeColumns = getFidelidadeColumns();
   const filtered = applyFidelidadeFilters(rows);
   const footer = filtered.length===rows.length ? '' :
     '<tr><td colspan="'+fidelidadeColumns.length+'" style="text-align:center;color:var(--lightgray);background:#fff;">'+
     filtered.length+' de '+rows.length+' pessoas (filtro ativo)</td></tr>';
   renderSortableTable('tableFidelidadeWrap', fidelidadeColumns, filtered, fidelidadeSortState, footer);
+
+  document.querySelectorAll('#tableFidelidadeWrap .fidDetailBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      showFidDetail(decodeURIComponent(btn.getAttribute('data-key')), windowMonths);
+    });
+  });
 }
 
 function exportDizimistasFidelidadeCSV(){
+  const fidelidadeColumns = getFidelidadeColumns();
   const rows = [...applyFidelidadeFilters(fidelidadeAllRows)].sort((a,b)=>{
-    const col = fidelidadeColumns.find(c=>c.key===fidelidadeSortState.key);
+    const col = fidelidadeColumns.find(c=>c.key===fidelidadeSortState.key) || { key:'quantidade' };
     let va = col.sortValue ? col.sortValue(a) : a[fidelidadeSortState.key];
     let vb = col.sortValue ? col.sortValue(b) : b[fidelidadeSortState.key];
     if(typeof va==='string'){ va=va.toLowerCase(); vb=vb.toLowerCase(); }
@@ -1152,6 +1192,42 @@ function exportDizimistasFidelidadeCSV(){
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+// Detalhe mês a mês de uma pessoa (botão "+"): mostra, dentro da janela de 12
+// meses em exibição, quanto e quando essa pessoa dizimou em cada mês — ajuda a
+// enxergar o padrão de renda/contribuição dela ao longo do tempo.
+function showFidDetail(nomeNormalizado, windowMonths){
+  const row = fidelidadeAllRows.find(r=>normalizeName(r.nome)===nomeNormalizado);
+  const nomeExibicao = row ? row.nome : nomeNormalizado;
+
+  const linhas = windowMonths.map(mk=>{
+    const d = (state[mk]?.doadores?.dizimistasList||[]).find(x=>normalizeName(x.nome)===nomeNormalizado);
+    return {
+      mes: mk,
+      valor: d ? d.valor : 0,
+      data: d ? (d.primeiraData===d.ultimaData ? formatDateBR(d.primeiraData) : formatDateBR(d.primeiraData)+' – '+formatDateBR(d.ultimaData)) : '—',
+      deu: !!d,
+    };
+  });
+
+  document.getElementById('fidDetailNome').textContent = nomeExibicao;
+  document.getElementById('fidDetailSub').textContent = windowMonths.length ?
+    ('Dízimo mês a mês — '+monthLabel(windowMonths[0])+' a '+monthLabel(windowMonths[windowMonths.length-1])+
+      ' · Total no período: '+brl(row ? row.totalDizimo : 0)) : '';
+
+  let html = '<table><thead><tr><th style="text-align:left;">Mês</th><th style="text-align:right;">Valor</th><th style="text-align:center;">Data</th></tr></thead><tbody>';
+  linhas.forEach((l,i)=>{
+    html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'>'+
+      '<td style="text-align:left;">'+monthLabel(l.mes)+'</td>'+
+      '<td style="text-align:right;'+(l.deu?'':'color:var(--lightgray);')+'">'+(l.deu?brl(l.valor):'—')+'</td>'+
+      '<td style="text-align:center;">'+l.data+'</td></tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById('fidDetailTableWrap').innerHTML = html;
+
+  document.getElementById('fidDetailOverlay').style.display = 'flex';
+}
+function hideFidDetail(){ document.getElementById('fidDetailOverlay').style.display = 'none'; }
 
 /* ===================== Orquestração ===================== */
 function renderAll(){
@@ -1175,6 +1251,7 @@ function renderAll(){
     ['doadores (cards)', renderDoadoresRow],
     ['doadores (gráfico)', renderDoadoresChart],
     ['doadores (categorias)', renderDoadoresCategorias],
+    ['seletor fidelidade (12 meses)', renderFidAnchorMonthSelect],
     ['dizimistas fiéis (Fidelidade)', renderDizimistasFidelidade]
   ];
   steps.forEach(([label,fn])=>{ try{ fn(); }catch(err){ console.error(label, err); } });
@@ -1198,7 +1275,7 @@ async function refresh(){
 }
 
 /* ===================== Wiring ===================== */
-['finMonthSelect','deptMonthSelect','despesasLancMonthSelect','doadoresMonthSelect'].forEach(id=>{
+['finMonthSelect','deptMonthSelect','despesasLancMonthSelect','doadoresMonthSelect','fidAnchorMonthSelect'].forEach(id=>{
   document.getElementById(id).addEventListener('change', renderAll);
 });
 
@@ -1210,6 +1287,18 @@ document.getElementById('fidFiltroIdadeMin').addEventListener('input', e=>{ fide
 document.getElementById('fidFiltroIdadeMax').addEventListener('input', e=>{ fidelidadeFilters.idadeMax = e.target.value; renderDizimistasFidelidade(); });
 document.getElementById('fidFiltroQtd').addEventListener('change', e=>{ fidelidadeFilters.quantidade = e.target.value; renderDizimistasFidelidade(); });
 document.getElementById('fidFiltroFaixa').addEventListener('change', e=>{ fidelidadeFilters.faixa = e.target.value; renderDizimistasFidelidade(); });
+
+document.getElementById('btnToggleTotalDizimo').addEventListener('click', ()=>{
+  fidelidadeShowTotal = !fidelidadeShowTotal;
+  // Se a ordenação atual era pela coluna que acabou de sumir, volta pro padrão
+  // pra não tentar ordenar por uma coluna que não existe mais na tabela.
+  if(!fidelidadeShowTotal && fidelidadeSortState.key==='totalDizimo'){ fidelidadeSortState.key='quantidade'; fidelidadeSortState.dir='asc'; }
+  document.getElementById('btnToggleTotalDizimo').textContent = fidelidadeShowTotal ? '👁 Ocultar Total' : '👁 Mostrar Total';
+  renderDizimistasFidelidade();
+});
+
+document.getElementById('fidDetailClose').addEventListener('click', hideFidDetail);
+document.getElementById('fidDetailOverlay').addEventListener('click', e=>{ if(e.target.id==='fidDetailOverlay') hideFidDetail(); });
 
 document.querySelectorAll('.tab-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
