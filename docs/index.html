@@ -1057,7 +1057,11 @@ function computeDizimistasFidelidade(){
       if(!info.has(key)) info.set(key, { nome: cleanName(d.nome), quantidade:0, totalDizimo:0, primeiroDizimo:null, ultimoDizimo:null });
       if(!windowSet.has(mk)) return; // fora da janela de 12 meses — não conta nem entra nas datas
       const p = info.get(key);
-      p.quantidade += 1;
+      // Conta cada lançamento (data) individualmente, mesmo que caiam no mesmo mês —
+      // "quantidade de vezes dizimadas" é por data, não por mês com atividade. Quando
+      // o mês ainda não foi reprocessado com o detalhe por data (dado antigo, sem
+      // `lancamentos`), cai pra 1 por mês, igual ao comportamento anterior.
+      p.quantidade += (d.lancamentos && d.lancamentos.length) ? d.lancamentos.length : 1;
       p.totalDizimo += d.valor;
       if(d.primeiraData && (!p.primeiroDizimo || d.primeiraData < p.primeiroDizimo)) p.primeiroDizimo = d.primeiraData;
       if(d.ultimaData && (!p.ultimoDizimo || d.ultimaData > p.ultimoDizimo)) p.ultimoDizimo = d.ultimaData;
@@ -1143,7 +1147,9 @@ function renderDizimistasFidelidade(){
   ].join('');
 
   const qtdSelect = document.getElementById('fidFiltroQtd');
-  const qtdMax = windowMonths.length;
+  // O máximo não é mais "1 por mês" (12) — alguém pode dizimar várias vezes no
+  // mesmo mês, então o teto do combo acompanha o maior valor real encontrado.
+  const qtdMax = rows.length ? Math.max(...rows.map(r=>r.quantidade)) : 0;
   if(qtdSelect.options.length - 1 !== qtdMax){
     const prevValue = qtdSelect.value;
     while(qtdSelect.options.length > 1) qtdSelect.remove(1);
