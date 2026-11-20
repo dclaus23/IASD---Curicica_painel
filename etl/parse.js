@@ -189,7 +189,7 @@ function parseFidelidadeFile(filePath) {
   // categoria (oferta) entra em ofertantes. Uma pessoa pode contar nos dois
   // grupos no mesmo mês. Usamos Set de "Código Pessoa" para nunca contar a
   // mesma pessoa duas vezes, mesmo com vários lançamentos no mês.
-  const byMonth = {}; // monthKey -> { dizimistas:Set, ofertantes:Set, totalDizimo, totalOferta, categorias:{codigo:{codigo,nome,valor}}, dizimistasInfo:Map(codigo->{codigo,nome,valor}) }
+  const byMonth = {}; // monthKey -> { dizimistas:Set, ofertantes:Set, totalDizimo, totalOferta, categorias:{codigo:{codigo,nome,valor}}, dizimistasInfo:Map(codigo->{...}), ofertantesInfo:Map(codigo->{...}) }
   for (let r = 1; r < rows.length; r++) {
     const row = rows[r];
     if (!row || row.length === 0) continue;
@@ -205,7 +205,7 @@ function parseFidelidadeFile(filePath) {
     const categoria = row[idx["Nome da Categoria"]];
     const valor = Number(row[idx["Valor"]]) || 0;
 
-    if (!byMonth[monthKey]) byMonth[monthKey] = { dizimistas: new Set(), ofertantes: new Set(), totalDizimo: 0, totalOferta: 0, categorias: {}, dizimistasInfo: new Map() };
+    if (!byMonth[monthKey]) byMonth[monthKey] = { dizimistas: new Set(), ofertantes: new Set(), totalDizimo: 0, totalOferta: 0, categorias: {}, dizimistasInfo: new Map(), ofertantesInfo: new Map() };
     const m2 = byMonth[monthKey];
     if (categoria === "Dízimo") {
       m2.dizimistas.add(pessoa);
@@ -216,7 +216,20 @@ function parseFidelidadeFile(filePath) {
       info.lancamentos.push({ data: isoDate, valor: round2(valor) });
       if (isoDate < info.primeiraData) info.primeiraData = isoDate;
       if (isoDate > info.ultimaData) info.ultimaData = isoDate;
-    } else { m2.ofertantes.add(pessoa); m2.totalOferta += valor; }
+    } else {
+      // Oferta (qualquer categoria que não seja Dízimo) — mesma lógica do dizimista,
+      // mas separada: uma pessoa pode ser dizimista e ofertante no mesmo mês, cada
+      // lista rastreia sua própria fidelidade (pensado para a página de Prestação
+      // de Contas, faixas "8 a 12 / 1 a 7 / zero").
+      m2.ofertantes.add(pessoa);
+      m2.totalOferta += valor;
+      if (!m2.ofertantesInfo.has(pessoa)) m2.ofertantesInfo.set(pessoa, { codigo: pessoa, nome: nomeCompleto, valor: 0, primeiraData: isoDate, ultimaData: isoDate, lancamentos: [] });
+      const infoO = m2.ofertantesInfo.get(pessoa);
+      infoO.valor += valor;
+      infoO.lancamentos.push({ data: isoDate, valor: round2(valor), categoria });
+      if (isoDate < infoO.primeiraData) infoO.primeiraData = isoDate;
+      if (isoDate > infoO.ultimaData) infoO.ultimaData = isoDate;
+    }
     if (!m2.categorias[codigo]) m2.categorias[codigo] = { codigo, nome: categoria, valor: 0 };
     m2.categorias[codigo].valor += valor;
   }
@@ -236,6 +249,9 @@ function parseFidelidadeFile(filePath) {
       categorias: Object.values(m2.categorias).map((c) => ({ ...c, valor: round2(c.valor) })),
       // Lista individual de quem deu Dízimo nesse mês (pra cruzar com 7Me e rastrear fidelidade por pessoa).
       dizimistasList: Array.from(m2.dizimistasInfo.values()).map((d) => ({ ...d, valor: round2(d.valor) })),
+      // Idem para quem deu Oferta (qualquer categoria != Dízimo) nesse mês — usado
+      // na página Prestação de Contas (faixas de fidelidade de Pacto/Ofertas).
+      ofertantesList: Array.from(m2.ofertantesInfo.values()).map((d) => ({ ...d, valor: round2(d.valor) })),
     };
   });
   return result;

@@ -111,6 +111,15 @@
   .auto-badge{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:10px;background:#FFF4E5;border:1px solid #F5C26B;color:#8a5a00;font-size:11px;font-weight:600;white-space:nowrap;cursor:help;}
   #fidDetailOverlay{position:fixed;inset:0;background:rgba(14,40,65,0.55);display:none;align-items:center;justify-content:center;z-index:5000;padding:16px;}
   #fidDetailOverlay .box{background:#fff;border-radius:10px;padding:24px;max-width:640px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.35);}
+  /* Modo Apresentação (aba Prestação de Contas) — fontes maiores pra ler do fundo da sala */
+  #tab-prestacao.presentation-mode h2{font-size:26px;}
+  #tab-prestacao.presentation-mode h3{font-size:19px;}
+  #tab-prestacao.presentation-mode .kpi .label{font-size:15px;}
+  #tab-prestacao.presentation-mode .kpi .value{font-size:30px;}
+  #tab-prestacao.presentation-mode table{font-size:17px;}
+  #tab-prestacao.presentation-mode th{padding:12px 14px;}
+  #tab-prestacao.presentation-mode td{padding:12px 14px;}
+  #tab-prestacao.presentation-mode .muted{font-size:14px;}
 </style>
 </head>
 <body>
@@ -146,6 +155,7 @@
   <button class="tab-btn" data-tab="tab-departamentos">Departamentos</button>
   <button class="tab-btn" data-tab="tab-despesas">Despesas</button>
   <button class="tab-btn" data-tab="tab-doadores">Dízimo/Oferta</button>
+  <button class="tab-btn" data-tab="tab-prestacao">Prestação de Contas</button>
 </nav>
 
 <div id="libBanner"></div>
@@ -309,6 +319,64 @@
 
   </div>
 
+  <!-- ===================== PÁGINA 5 — PRESTAÇÃO DE CONTAS ===================== -->
+  <div id="tab-prestacao" class="tab-panel">
+
+    <section>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <h2 style="border:none;margin:0;padding:0;">Prestação de Contas</h2>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <label class="muted">De: </label><select id="pcDeSelect"></select>
+          <label class="muted">Até: </label><select id="pcAteSelect"></select>
+          <button id="btnPcPresentation" type="button" class="pill-btn">🖥 Modo Apresentação</button>
+        </div>
+      </div>
+      <p class="muted" id="pcPeriodoSubtitulo" style="margin-top:4px;"></p>
+      <div class="kpis" id="pcKpiRow" style="margin-top:14px;"></div>
+    </section>
+
+    <section>
+      <h2 style="border:none;margin:0 0 4px;padding:0;">Fidelidade no Período</h2>
+      <p class="muted">Quantos meses do período cada pessoa contribuiu — Dízimo e Pacto/Ofertas contados separadamente (uma pessoa pode estar nos dois). Roster vem do cadastro "Fidelidade da Igreja" + qualquer pessoa já registrada no histórico.</p>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:14px;">
+        <div style="flex:1;min-width:280px;">
+          <h3 style="color:var(--navy);font-size:15px;margin:0 0 8px;">Dízimo</h3>
+          <div class="kpis" id="pcFidDizimoRow"></div>
+        </div>
+        <div style="flex:1;min-width:280px;">
+          <h3 style="color:var(--navy);font-size:15px;margin:0 0 8px;">Pacto/Ofertas</h3>
+          <div class="kpis" id="pcFidOfertaRow"></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <h2 style="border:none;margin:0;padding:0;">Distribuição das Ofertas</h2>
+        <button id="btnPcEditDistrib" type="button" class="pill-btn">✎ Editar percentuais</button>
+      </div>
+      <p class="muted">Rateio nacional (fixo, mas editável aqui se a Associação atualizar os percentuais) aplicado sobre o total de Dízimo e o total de Oferta do período selecionado acima — mostra quanto nossa igreja gerou de participação em cada destino.</p>
+      <div class="table-scroll" id="pcDistribWrap" style="margin-top:14px;"></div>
+    </section>
+
+    <section>
+      <h2>Dízimos e Ofertas — por mês</h2>
+      <div class="table-scroll" id="pcDizimoOfertaWrap"></div>
+    </section>
+
+    <section>
+      <h2>Entradas x Despesas — por mês</h2>
+      <div class="table-scroll" id="pcEntradaSaidaWrap"></div>
+    </section>
+
+    <section>
+      <h2>Despesas por Categoria — total do período</h2>
+      <p class="muted">Soma de todos os meses do período selecionado acima. Clique no cabeçalho de qualquer coluna para ordenar.</p>
+      <div class="table-scroll" id="pcDespesasWrap"></div>
+    </section>
+
+  </div>
+
   <div id="fidDetailOverlay">
     <div class="box">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
@@ -380,6 +448,7 @@ let categoryPercentagesFidelidade = {};
 let despesasClassificacao = {};
 let despesaClassResolved = new Map();
 let fidelidadePessoas = {};
+let distribuicaoOfertas = { igrejaLocal:60, ag:20, ars:14, useb:3.6, dsa:2.4 };
 let charts = {};
 
 /* ===================== Autenticação (Supabase Auth, via REST simples) ===================== */
@@ -459,7 +528,7 @@ async function loadFromSupabase(){
   rows.forEach(r => { newState[r.month_key] = r.data; });
   state = newState;
 
-  const settingsRows = await sbFetch('app_settings?select=category_registry,category_filters,category_percentages,category_percentages_fidelidade,despesas_classificacao,fidelidade_pessoas&id=eq.1');
+  const settingsRows = await sbFetch('app_settings?select=category_registry,category_filters,category_percentages,category_percentages_fidelidade,despesas_classificacao,fidelidade_pessoas,distribuicao_ofertas&id=eq.1');
   if(settingsRows && settingsRows[0]){
     categoryRegistry = settingsRows[0].category_registry || {};
     categoryFilters = settingsRows[0].category_filters || {};
@@ -467,6 +536,7 @@ async function loadFromSupabase(){
     categoryPercentagesFidelidade = settingsRows[0].category_percentages_fidelidade || {};
     despesasClassificacao = settingsRows[0].despesas_classificacao || {};
     fidelidadePessoas = settingsRows[0].fidelidade_pessoas || {};
+    distribuicaoOfertas = settingsRows[0].distribuicao_ofertas || distribuicaoOfertas;
   }
 }
 
@@ -487,6 +557,16 @@ async function saveDespesasClassificacao(){
     method: 'PATCH',
     body: JSON.stringify({
       despesas_classificacao: despesasClassificacao,
+      updated_at: new Date().toISOString()
+    })
+  });
+}
+
+async function saveDistribuicaoOfertas(){
+  await sbFetch('app_settings?id=eq.1', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      distribuicao_ofertas: distribuicaoOfertas,
       updated_at: new Date().toISOString()
     })
   });
@@ -1253,6 +1333,239 @@ function showFidDetail(nomeNormalizado, windowMonths){
 }
 function hideFidDetail(){ document.getElementById('fidDetailOverlay').style.display = 'none'; }
 
+/* ===================== PÁGINA 5 — Prestação de Contas ===================== */
+// Período livre (De/Até), independente dos seletores de mês único das outras 4 abas.
+function pcAllMonths(){ return getSortedMonthKeys().filter(k=>state[k].entrada!=null || (state[k].departments && state[k].departments.length)); }
+
+function renderPcPeriodSelects(){
+  const months = pcAllMonths();
+  const deSel = document.getElementById('pcDeSelect');
+  const ateSel = document.getElementById('pcAteSelect');
+  const prevDe = deSel.value, prevAte = ateSel.value;
+  const optsHtml = months.map(k=>'<option value="'+k+'">'+monthLabel(k)+'</option>').join('');
+  deSel.innerHTML = optsHtml; ateSel.innerHTML = optsHtml;
+  deSel.value = months.includes(prevDe) ? prevDe : (months[Math.max(0, months.length-6)] || '');
+  ateSel.value = months.includes(prevAte) ? prevAte : (months[months.length-1] || '');
+}
+
+function getPcPeriodMonths(){
+  const months = pcAllMonths();
+  let de = document.getElementById('pcDeSelect').value;
+  let ate = document.getElementById('pcAteSelect').value;
+  if(!de || !ate) return [];
+  if(de > ate){ const tmp=de; de=ate; ate=tmp; } // troca se o usuário inverteu De/Até
+  return months.filter(k=>k>=de && k<=ate);
+}
+
+function renderPcKpis(){
+  const months = getPcPeriodMonths();
+  const wrap = document.getElementById('pcKpiRow');
+  const sub = document.getElementById('pcPeriodoSubtitulo');
+  if(!months.length){ wrap.innerHTML = '<p class="muted">Selecione um período com dados.</p>'; sub.textContent=''; return; }
+  sub.textContent = 'Período: '+monthLabel(months[0])+' a '+monthLabel(months[months.length-1])+' ('+months.length+' '+(months.length===1?'mês':'meses')+')';
+
+  const totEntradas = round2(sum(months.map(k=>state[k].entrada ?? 0)));
+  const totDespesas = round2(sum(months.map(k=>state[k].saida ?? 0)));
+  const saldoPeriodo = round2(totEntradas - totDespesas);
+
+  const firstWithDept = months.find(k=>state[k].departments && state[k].departments.length);
+  const lastWithDept = [...months].reverse().find(k=>state[k].departments && state[k].departments.length);
+  const saldoInicial = firstWithDept ? round2(sum(state[firstWithDept].departments.map(d=>d.saldoInicial))) : null;
+  const saldoFinal = lastWithDept ? round2(sum(state[lastWithDept].departments.map(d=>d.saldoFinal))) : null;
+  const adiantamento = lastWithDept ? round2(sum(state[lastWithDept].departments.map(d=>d.adiantamento))) : 0;
+
+  wrap.innerHTML = [
+    despesaKpiCard('Saldo Inicial — '+(firstWithDept?monthLabel(firstWithDept):'—'), saldoInicial, 'blue', v=>v==null?'—':brl(v)),
+    despesaKpiCard('Total Entradas do Período', totEntradas, 'green', brl),
+    despesaKpiCard('Total Despesas do Período', totDespesas, 'orange', brl),
+    despesaKpiCard('Saldo Final — '+(lastWithDept?monthLabel(lastWithDept):'—'), saldoFinal, 'blue', v=>v==null?'—':brl(v)),
+    despesaKpiCard('Adiantamentos Pendentes', adiantamento, adiantamento?'red':'green', brl),
+    despesaKpiCard('Saldo do Período (Entradas − Despesas)', saldoPeriodo, saldoPeriodo>=0?'green':'red', brl),
+  ].join('');
+}
+
+// Faixas de fidelidade dentro do período escolhido — generaliza o "8 a 12 / 1 a 7 /
+// zero" do relatório original (pensado pra uma janela de 12 meses) pra qualquer
+// período: o corte fica em metade do nº de meses do período selecionado. Conta por
+// MÊS com atividade (não por lançamento) — é a pergunta "em quantos meses do
+// período essa pessoa contribuiu", igual ao relatório original.
+function computePcFidelidade(tipo){
+  const months = getPcPeriodMonths();
+  const totalMeses = months.length;
+  const listKey = tipo==='dizimo' ? 'dizimistasList' : 'ofertantesList';
+  const monthsByPerson = new Map(); // nomeNormalizado -> Set(monthKey)
+  months.forEach(mk=>{
+    (state[mk]?.doadores?.[listKey]||[]).forEach(d=>{
+      const key = normalizeName(d.nome);
+      if(!monthsByPerson.has(key)) monthsByPerson.set(key, new Set());
+      monthsByPerson.get(key).add(mk);
+    });
+  });
+  // Roster: cadastro atual da igreja (Fidelidade da Igreja) + qualquer pessoa que já
+  // apareceu nessa lista em qualquer mês de todo o histórico carregado (mesma lógica
+  // da Fidelidade dos Dizimistas) — quem não contribuiu no período ainda aparece, com 0.
+  const roster = new Set(Object.keys(fidelidadePessoas));
+  getSortedMonthKeys().forEach(mk=>{
+    (state[mk]?.doadores?.[listKey]||[]).forEach(d=>roster.add(normalizeName(d.nome)));
+  });
+  const threshold = Math.ceil((totalMeses||1)/2);
+  let zero=0, abaixo=0, acima=0;
+  roster.forEach(key=>{
+    const n = monthsByPerson.has(key) ? monthsByPerson.get(key).size : 0;
+    if(n===0) zero++; else if(totalMeses>1 && n<threshold) abaixo++; else acima++;
+  });
+  return { zero, abaixo, acima, total: roster.size, totalMeses, threshold };
+}
+
+function pcBucketRow(stats){
+  if(stats.totalMeses<=1){
+    return [
+      bucketTileHtml('Contribuiu no mês', stats.acima, 'green'),
+      bucketTileHtml('Não contribuiu', stats.zero, 'red'),
+      bucketTileHtml('Total de Pessoas', stats.total, 'blue'),
+    ].join('');
+  }
+  return [
+    bucketTileHtml(stats.threshold+' a '+stats.totalMeses+' meses', stats.acima, 'green'),
+    bucketTileHtml('1 a '+(stats.threshold-1)+' meses', stats.abaixo, 'orange'),
+    bucketTileHtml('Não contribuiu', stats.zero, 'red'),
+    bucketTileHtml('Total de Pessoas', stats.total, 'blue'),
+  ].join('');
+}
+
+function renderPcFidelidade(){
+  document.getElementById('pcFidDizimoRow').innerHTML = pcBucketRow(computePcFidelidade('dizimo'));
+  document.getElementById('pcFidOfertaRow').innerHTML = pcBucketRow(computePcFidelidade('oferta'));
+}
+
+// Distribuição das Ofertas — percentuais fixos nacionais (editáveis aqui caso a
+// Associação atualize), aplicados sobre o total de Dízimo e o total de Oferta do
+// período, mostrando quanto nossa igreja gerou de participação em cada destino.
+let pcEditDistrib = false;
+const PC_DESTINOS = [
+  { key:'igrejaLocal', label:'Igreja Local' },
+  { key:'ag', label:'AG' },
+  { key:'ars', label:'ARS' },
+  { key:'useb', label:'USeB' },
+  { key:'dsa', label:'DSA' },
+];
+
+function renderPcDistribuicao(){
+  const months = getPcPeriodMonths();
+  const totalDizimo = round2(sum(months.map(k=>state[k]?.doadores?.totalDizimo ?? 0)));
+  const totalOferta = round2(sum(months.map(k=>state[k]?.doadores?.totalOferta ?? 0)));
+  let html = '<table><thead><tr><th style="text-align:left;">Destino</th><th>%</th><th>Dízimo do Período</th><th>Oferta do Período</th><th>Total</th></tr></thead><tbody>';
+  let somaPct=0, totD=0, totO=0;
+  PC_DESTINOS.forEach((d,i)=>{
+    const pct = distribuicaoOfertas[d.key] ?? 0;
+    somaPct += pct;
+    const vD = round2(totalDizimo * pct/100);
+    const vO = round2(totalOferta * pct/100);
+    totD+=vD; totO+=vO;
+    const pctCell = pcEditDistrib
+      ? '<input type="number" class="pctInputDistrib" data-destino="'+d.key+'" value="'+pct+'" min="0" max="100" step="0.1" style="width:64px;padding:6px;border:1px solid #ccc;border-radius:6px;">%'
+      : num(pct,1)+'%';
+    html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'><td style="text-align:left;">'+d.label+'</td><td>'+pctCell+'</td>'+
+      '<td>'+brl(vD)+'</td><td>'+brl(vO)+'</td><td style="font-weight:700;">'+brl(vD+vO)+'</td></tr>';
+  });
+  html += '<tr class="total"><td>TOTAL</td><td>'+num(somaPct,1)+'%</td><td>'+brl(totD)+'</td><td>'+brl(totO)+'</td><td>'+brl(totD+totO)+'</td></tr>';
+  html += '</tbody></table>';
+  if(Math.abs(somaPct-100)>0.1){
+    html += '<p class="muted" style="color:var(--red);margin-top:6px;">⚠ Os percentuais somam '+num(somaPct,1)+'%, não 100%.</p>';
+  }
+  document.getElementById('pcDistribWrap').innerHTML = html;
+
+  if(pcEditDistrib){
+    document.querySelectorAll('.pctInputDistrib').forEach(inp=>{
+      inp.addEventListener('change', async e=>{
+        let v = Number(e.target.value);
+        if(isNaN(v)) v = 0;
+        v = Math.max(0, Math.min(100, v));
+        distribuicaoOfertas[e.target.getAttribute('data-destino')] = v;
+        renderPcDistribuicao();
+        try{ await saveDistribuicaoOfertas(); setSyncStatus('ok','✓ Percentual salvo'); }
+        catch(err){ setSyncStatus('err','⚠ Não consegui salvar: '+err.message); }
+      });
+    });
+  }
+}
+
+function renderPcDizimoOferta(){
+  const months = getPcPeriodMonths();
+  const wrap = document.getElementById('pcDizimoOfertaWrap');
+  if(!months.length){ wrap.innerHTML = '<p class="muted">Sem dados para o período selecionado.</p>'; return; }
+  let html = '<table><thead><tr><th style="text-align:left;">Mês</th><th>Dízimos</th><th>Ofertas</th><th>Total</th></tr></thead><tbody>';
+  let totD=0, totO=0;
+  months.forEach((mk,i)=>{
+    const d = state[mk]?.doadores;
+    const vD = d?.totalDizimo ?? 0, vO = d?.totalOferta ?? 0;
+    totD+=vD; totO+=vO;
+    html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'><td style="text-align:left;">'+monthLabel(mk)+'</td><td>'+brl(vD)+'</td><td>'+brl(vO)+'</td><td style="font-weight:700;">'+brl(vD+vO)+'</td></tr>';
+  });
+  html += '<tr class="total"><td>TOTAL</td><td>'+brl(totD)+'</td><td>'+brl(totO)+'</td><td>'+brl(totD+totO)+'</td></tr>';
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function renderPcEntradaSaida(){
+  const months = getPcPeriodMonths();
+  const wrap = document.getElementById('pcEntradaSaidaWrap');
+  if(!months.length){ wrap.innerHTML = '<p class="muted">Sem dados para o período selecionado.</p>'; return; }
+  let html = '<table><thead><tr><th style="text-align:left;">Mês</th><th>Entradas</th><th>Despesas</th><th>Saldo</th></tr></thead><tbody>';
+  let totE=0, totS=0;
+  months.forEach((mk,i)=>{
+    const e = state[mk]?.entrada, s = state[mk]?.saida;
+    if(e!=null) totE+=e; if(s!=null) totS+=s;
+    const saldo = (e!=null && s!=null) ? round2(e-s) : null;
+    html += '<tr'+(i%2?' style="background:#F2F4F6;"':'')+'><td style="text-align:left;">'+monthLabel(mk)+'</td><td class="blue-txt">'+num(e)+'</td><td class="orange-txt">'+num(s)+'</td>'+
+      '<td class="'+(saldo==null?'':(saldo>=0?'var-up':'var-down'))+'">'+(saldo==null?'—':num(saldo))+'</td></tr>';
+  });
+  const saldoTot = round2(totE-totS);
+  html += '<tr class="total"><td>TOTAL</td><td class="blue-txt">'+num(totE)+'</td><td class="orange-txt">'+num(totS)+'</td>'+
+    '<td class="'+(saldoTot>=0?'var-up':'var-down')+'">'+num(saldoTot)+'</td></tr>';
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+const pcDespesasColumns = [
+  { key:'nome', label:'Categoria', left:true },
+  { key:'valor', label:'Total', format:r=>brl(r.valor), cellClass:()=>'orange-txt' },
+];
+let pcDespesasSortState = { key:'valor', dir:'desc', onChange: ()=>renderPcDespesas() };
+
+function renderPcDespesas(){
+  const months = getPcPeriodMonths();
+  const wrap = document.getElementById('pcDespesasWrap');
+  const byCodigo = new Map();
+  months.forEach(mk=>{
+    (state[mk]?.despesasCategorias||[]).forEach(c=>{
+      if(!byCodigo.has(c.codigo)) byCodigo.set(c.codigo, { codigo:c.codigo, nome:c.nome, valor:0 });
+      byCodigo.get(c.codigo).valor += c.valor||0;
+    });
+  });
+  const rows = Array.from(byCodigo.values()).map(r=>({ ...r, valor: round2(r.valor) }));
+  if(!rows.length){ wrap.innerHTML = '<p class="muted">Sem dados de despesas para o período selecionado.</p>'; return; }
+  const total = round2(sum(rows.map(r=>r.valor)));
+  const footer = '<tr class="total"><td>TOTAL</td><td class="orange-txt">'+brl(total)+'</td></tr>';
+  renderSortableTable('pcDespesasWrap', pcDespesasColumns, rows, pcDespesasSortState, footer);
+}
+
+function renderPcAll(){
+  renderPcKpis();
+  renderPcFidelidade();
+  renderPcDistribuicao();
+  renderPcDizimoOferta();
+  renderPcEntradaSaida();
+  renderPcDespesas();
+}
+
+let pcPresentationMode = false;
+function togglePcPresentation(){
+  pcPresentationMode = !pcPresentationMode;
+  document.getElementById('tab-prestacao').classList.toggle('presentation-mode', pcPresentationMode);
+  document.getElementById('btnPcPresentation').textContent = pcPresentationMode ? '🖥 Sair do Modo Apresentação' : '🖥 Modo Apresentação';
+}
+
 /* ===================== Orquestração ===================== */
 function renderAll(){
   const steps = [
@@ -1276,7 +1589,9 @@ function renderAll(){
     ['doadores (gráfico)', renderDoadoresChart],
     ['doadores (categorias)', renderDoadoresCategorias],
     ['seletor fidelidade (12 meses)', renderFidAnchorMonthSelect],
-    ['dizimistas fiéis (Fidelidade)', renderDizimistasFidelidade]
+    ['dizimistas fiéis (Fidelidade)', renderDizimistasFidelidade],
+    ['seletor de período (prestação de contas)', renderPcPeriodSelects],
+    ['prestação de contas', renderPcAll]
   ];
   steps.forEach(([label,fn])=>{ try{ fn(); }catch(err){ console.error(label, err); } });
 }
@@ -1323,6 +1638,15 @@ document.getElementById('btnToggleTotalDizimo').addEventListener('click', ()=>{
 
 document.getElementById('fidDetailClose').addEventListener('click', hideFidDetail);
 document.getElementById('fidDetailOverlay').addEventListener('click', e=>{ if(e.target.id==='fidDetailOverlay') hideFidDetail(); });
+
+document.getElementById('pcDeSelect').addEventListener('change', renderPcAll);
+document.getElementById('pcAteSelect').addEventListener('change', renderPcAll);
+document.getElementById('btnPcPresentation').addEventListener('click', togglePcPresentation);
+document.getElementById('btnPcEditDistrib').addEventListener('click', ()=>{
+  pcEditDistrib = !pcEditDistrib;
+  document.getElementById('btnPcEditDistrib').textContent = pcEditDistrib ? '✓ Concluir edição' : '✎ Editar percentuais';
+  renderPcDistribuicao();
+});
 
 document.querySelectorAll('.tab-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{

@@ -56,3 +56,21 @@ create policy "public update app_settings" on app_settings
 -- ============================================================
 alter table app_settings add column if not exists category_percentages jsonb not null default '{}'::jsonb;
 alter table app_settings add column if not exists category_percentages_fidelidade jsonb not null default '{}'::jsonb;
+
+-- ============================================================
+-- Atualização (10/2026): classificação por lançamento de despesa
+-- (Fixo/Parcela/Pontual/Excluir) e o cadastro "Fidelidade da Igreja"
+-- (cargo/idade por pessoa). ESTE ARQUIVO AINDA ESTÁ DESATUALIZADO —
+-- faltam as 3 policies restritas a "authenticated" (hoje em produção
+-- o acesso exige login via Supabase Auth, não é mais leitura pública
+-- como os blocos acima descrevem). Ver PROJETO-CONTEXTO.md.
+-- ============================================================
+alter table app_settings add column if not exists despesas_classificacao jsonb not null default '{}'::jsonb;
+alter table app_settings add column if not exists fidelidade_pessoas jsonb not null default '{}'::jsonb;
+
+-- ============================================================
+-- Atualização (11/2026): percentuais de rateio nacional (Igreja Local/
+-- AG/ARS/USeB/DSA) usados na página "Prestação de Contas", aplicados
+-- sobre o total de Dízimo e o total de Oferta do período selecionado.
+-- ============================================================
+alter table app_settings add column if not exists distribuicao_ofertas jsonb not null default '{"igrejaLocal":60,"ag":20,"ars":14,"useb":3.6,"dsa":2.4}'::jsonb;
