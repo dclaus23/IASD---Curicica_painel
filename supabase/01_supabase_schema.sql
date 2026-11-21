@@ -69,8 +69,15 @@ alter table app_settings add column if not exists despesas_classificacao jsonb n
 alter table app_settings add column if not exists fidelidade_pessoas jsonb not null default '{}'::jsonb;
 
 -- ============================================================
--- Atualização (11/2026): percentuais de rateio nacional (Igreja Local/
--- AG/ARS/USeB/DSA) usados na página "Prestação de Contas", aplicados
--- sobre o total de Dízimo e o total de Oferta do período selecionado.
+-- Atualização (11/2026): percentuais de rateio nacional da OFERTA (Igreja
+-- Local/AG/ARS/USeB/DSA) usados na página "Prestação de Contas", aplicados
+-- sobre o total de Oferta do período selecionado.
 -- ============================================================
 alter table app_settings add column if not exists distribuicao_ofertas jsonb not null default '{"igrejaLocal":60,"ag":20,"ars":14,"useb":3.6,"dsa":2.4}'::jsonb;
+
+-- ============================================================
+-- Atualização (11/2026): percentuais de rateio nacional do DÍZIMO — esquema
+-- DIFERENTE do de oferta acima (dízimo nunca fica com a igreja local). Usado
+-- na mesma página "Prestação de Contas", com botão pra alternar entre os dois.
+-- ============================================================
+alter table app_settings add column if not exists distribuicao_dizimos jsonb not null default '{"campoLocal":68,"useb":10,"dsa":10,"educacaoArs":5,"ensinoSuperior":1.5,"ipae":2,"publicacoes":1,"novoTempo":2.5}'::jsonb;
